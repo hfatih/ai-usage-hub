@@ -8,6 +8,7 @@ import {
   Gauge,
   LayoutGrid,
   RefreshCw,
+  Server,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -16,11 +17,12 @@ import {
 import { useHub } from "../stores/hub";
 import { localizeValue, useTranslation } from "../i18n";
 
-export type PageId = "dashboard" | "accounts" | "apps" | "usage" | "activity" | "notifications" | "integrations" | "security" | "settings";
+export type PageId = "dashboard" | "accounts" | "proxy" | "apps" | "usage" | "activity" | "notifications" | "integrations" | "security" | "settings";
 
 const navItems: Array<{ id: PageId; label: string; icon: typeof Gauge }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
   { id: "accounts", label: "Accounts", icon: UserRoundCog },
+  { id: "proxy", label: "API Proxy", icon: Server },
   { id: "apps", label: "Apps", icon: Boxes },
   { id: "usage", label: "Usage", icon: ChartNoAxesCombined },
   { id: "activity", label: "Activity", icon: Activity },

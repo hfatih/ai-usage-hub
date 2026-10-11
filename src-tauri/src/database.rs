@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use crate::{
     error::Result,
     models::{
-        AccountSummary, ActivityEvent, AppSettings, AppStatus, ApplicationDefinition, Confidence,
+        AccountSummary, ActivityEvent, AntigravityAccount, AppSettings, AppStatus, ApplicationDefinition, Confidence,
         ConnectionStatus, ProviderSummary, RunningState, SecurityStatus, Severity,
         UsageHistoryPoint, UsageSource, UsageValue,
     },
@@ -30,7 +30,7 @@ impl Database {
     }
 
     #[cfg(test)]
-    fn memory() -> Result<Self> {
+    pub(crate) fn memory() -> Result<Self> {
         let connection = Connection::open_in_memory()?;
         let mut database = Self {
             connection,
@@ -147,8 +147,24 @@ impl Database {
                 status TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS antigravity_accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                access_token TEXT NOT NULL,
+                refresh_token TEXT NOT NULL,
+                id_token TEXT,
+                project_id TEXT,
+                expiry_timestamp INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                is_current INTEGER NOT NULL DEFAULT 0,
+                last_used INTEGER NOT NULL,
+                quota_remaining_percent REAL,
+                quota_details_json TEXT
+            );
             "#,
         )?;
+        let _ = self.connection.execute("ALTER TABLE antigravity_accounts ADD COLUMN quota_details_json TEXT;", []);
         Ok(())
     }
 
@@ -562,6 +578,134 @@ impl Database {
                 params![title, detail, now],
             )?;
         }
+        Ok(())
+    }
+
+    pub fn antigravity_accounts(&self) -> Result<Vec<AntigravityAccount>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json FROM antigravity_accounts ORDER BY is_current DESC, last_used DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AntigravityAccount {
+                id: row.get(0)?,
+                email: row.get(1)?,
+                display_name: row.get(2)?,
+                access_token: row.get(3)?,
+                refresh_token: row.get(4)?,
+                id_token: row.get(5)?,
+                project_id: row.get(6)?,
+                expiry_timestamp: row.get(7)?,
+                status: row.get(8)?,
+                is_current: row.get::<_, i64>(9)? == 1,
+                last_used: row.get(10)?,
+                quota_remaining_percent: row.get(11)?,
+                quota_details: row.get::<_, Option<String>>(12).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn antigravity_account(&self, id: &str) -> Result<Option<AntigravityAccount>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json FROM antigravity_accounts WHERE id = ?1",
+        )?;
+        let row = stmt.query_row([id], |row| {
+            Ok(AntigravityAccount {
+                id: row.get(0)?,
+                email: row.get(1)?,
+                display_name: row.get(2)?,
+                access_token: row.get(3)?,
+                refresh_token: row.get(4)?,
+                id_token: row.get(5)?,
+                project_id: row.get(6)?,
+                expiry_timestamp: row.get(7)?,
+                status: row.get(8)?,
+                is_current: row.get::<_, i64>(9)? == 1,
+                last_used: row.get(10)?,
+                quota_remaining_percent: row.get(11)?,
+                quota_details: row.get::<_, Option<String>>(12).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
+            })
+        }).optional()?;
+        Ok(row)
+    }
+
+    pub fn save_antigravity_account(&self, account: &AntigravityAccount) -> Result<()> {
+        let details_json = account.quota_details.as_ref().and_then(|d| serde_json::to_string(d).ok());
+        self.connection.execute(
+            r#"
+            INSERT INTO antigravity_accounts (
+                id, email, display_name, access_token, refresh_token, id_token,
+                project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent,
+                quota_details_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ON CONFLICT(id) DO UPDATE SET
+                email = excluded.email,
+                display_name = COALESCE(excluded.display_name, antigravity_accounts.display_name),
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                id_token = COALESCE(excluded.id_token, antigravity_accounts.id_token),
+                project_id = COALESCE(excluded.project_id, antigravity_accounts.project_id),
+                expiry_timestamp = excluded.expiry_timestamp,
+                status = excluded.status,
+                is_current = excluded.is_current,
+                last_used = excluded.last_used,
+                quota_remaining_percent = COALESCE(excluded.quota_remaining_percent, antigravity_accounts.quota_remaining_percent),
+                quota_details_json = COALESCE(excluded.quota_details_json, antigravity_accounts.quota_details_json)
+            "#,
+            params![
+                account.id,
+                account.email,
+                account.display_name,
+                account.access_token,
+                account.refresh_token,
+                account.id_token,
+                account.project_id,
+                account.expiry_timestamp,
+                account.status,
+                if account.is_current { 1 } else { 0 },
+                account.last_used,
+                account.quota_remaining_percent,
+                details_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_current_antigravity_account(&self, id: &str) -> Result<()> {
+        self.connection.execute("UPDATE antigravity_accounts SET is_current = 0", [])?;
+        self.connection.execute(
+            "UPDATE antigravity_accounts SET is_current = 1, last_used = ?2 WHERE id = ?1",
+            params![id, Utc::now().timestamp()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_antigravity_account(&self, id: &str) -> Result<bool> {
+        let count = self
+            .connection
+            .execute("DELETE FROM antigravity_accounts WHERE id = ?1", [id])?;
+        Ok(count > 0)
+    }
+
+    pub fn record_activity_event(
+        &self,
+        event_type: &str,
+        account_id: Option<&str>,
+        title: &str,
+        detail: Option<&str>,
+        severity: Severity,
+        now: i64,
+    ) -> Result<()> {
+        let severity_str = match severity {
+            Severity::Success => "success",
+            Severity::Warning => "warning",
+            Severity::Danger => "danger",
+            Severity::Info => "info",
+        };
+        self.connection.execute(
+            "INSERT INTO activity_events (event_type, account_id, title, detail, severity, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![event_type, account_id, title, detail, severity_str, now],
+        )?;
         Ok(())
     }
 }

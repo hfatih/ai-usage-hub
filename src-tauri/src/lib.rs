@@ -1,9 +1,11 @@
+pub mod antigravity;
 mod commands;
 mod database;
 mod detector;
 mod error;
 mod i18n;
 mod models;
+pub mod proxy;
 mod providers;
 
 use std::{
@@ -29,14 +31,14 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 pub struct HubState {
-    database: Mutex<Database>,
-    detector: Mutex<ProcessDetector>,
-    statuses: RwLock<Vec<AppStatus>>,
-    providers: RwLock<Vec<ProviderSummary>>,
-    last_provider_refresh: Mutex<Option<Instant>>,
-    provider_refreshing: AtomicBool,
-    paused: AtomicBool,
-    quitting: AtomicBool,
+    pub(crate) database: Mutex<Database>,
+    pub(crate) detector: Mutex<ProcessDetector>,
+    pub(crate) statuses: RwLock<Vec<AppStatus>>,
+    pub(crate) providers: RwLock<Vec<ProviderSummary>>,
+    pub(crate) last_provider_refresh: Mutex<Option<Instant>>,
+    pub(crate) provider_refreshing: AtomicBool,
+    pub(crate) paused: AtomicBool,
+    pub(crate) quitting: AtomicBool,
 }
 
 impl HubState {
@@ -101,6 +103,9 @@ fn refresh_providers(state: &HubState, force: bool) -> Result<bool> {
                 if let Ok(mut database) = state.database.lock() {
                     if let Err(error) = database.save_provider_snapshot(provider) {
                         tracing::warn!(%error, "could not persist provider usage snapshot");
+                    }
+                    if provider.id == "google" {
+                        let _ = antigravity::sync_antigravity_active_session(&database);
                     }
                 }
             } else if let Ok(database) = state.database.lock() {
@@ -303,6 +308,11 @@ fn start_monitor(app: tauri::AppHandle) {
             }
             Err(error) => tracing::warn!(%error, "background refresh failed"),
         }
+        if let Ok(Some(switched)) = antigravity::check_and_auto_switch(&app.state::<HubState>()) {
+            tracing::info!(account = %switched.email, "Antigravity auto-switched account");
+            let _ = app.emit("hub://status-changed", ());
+            let _ = app.emit("hub://antigravity-switched", &switched);
+        }
         let interval = app
             .state::<HubState>()
             .database
@@ -318,13 +328,30 @@ fn start_monitor(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "ai_usage_hub=info,warn".into()),
-        )
-        .with_target(false)
-        .try_init();
+    let log_file = std::env::var_os("LOCALAPPDATA").and_then(|appdata| {
+        let dir = std::path::PathBuf::from(appdata).join("AI Usage Hub");
+        let _ = fs::create_dir_all(&dir);
+        fs::OpenOptions::new().create(true).append(true).open(dir.join("app.log")).ok()
+    });
+
+    if let Some(file) = log_file {
+        let _ = tracing_subscriber::fmt()
+            .with_writer(file)
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "ai_usage_hub=info,warn".into()),
+            )
+            .with_target(false)
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "ai_usage_hub=info,warn".into()),
+            )
+            .with_target(false)
+            .try_init();
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -333,22 +360,43 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .setup(|app| {
-            let app_data = app.path().app_data_dir()?;
-            fs::create_dir_all(&app_data)?;
-            let database = Database::open(&app_data.join("ai-usage-hub.sqlite3"))?;
+            tracing::info!("Starting setup...");
+            let app_data = match app.path().app_data_dir() {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to get app_data_dir");
+                    return Err(e.into());
+                }
+            };
+            let _ = fs::create_dir_all(&app_data);
+            let database = match Database::open(&app_data.join("ai-usage-hub.sqlite3")) {
+                Ok(db) => db,
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to open sqlite database");
+                    return Err(e.into());
+                }
+            };
             app.manage(HubState::new(database));
             let state = app.state::<HubState>();
-            refresh_state(&state)?;
-            build_tray(app)?;
+            if let Err(e) = refresh_state(&state) {
+                tracing::warn!(error = %e, "refresh_state failed during setup");
+            }
+            if let Err(e) = build_tray(app) {
+                tracing::error!(error = %e, "build_tray failed during setup");
+                return Err(e.into());
+            }
             if std::env::args().any(|arg| arg == "--minimized") {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
                 }
             }
             start_monitor(app.handle().clone());
+            proxy::start_proxy_server(app.handle().clone(), proxy::DEFAULT_PROXY_PORT);
+            tracing::info!("Setup completed successfully!");
             Ok(())
         })
         .on_window_event(|window, event| {
+            tracing::info!("Window event: {:?}", event);
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<HubState>();
                 if state.quitting.load(Ordering::Relaxed) {
@@ -381,6 +429,24 @@ pub fn run() {
             commands::set_monitoring_paused,
             commands::set_app_executable,
             commands::launch_app,
+            commands::get_antigravity_accounts,
+            commands::capture_current_antigravity_account,
+            commands::add_antigravity_account,
+            commands::delete_antigravity_account,
+            commands::switch_antigravity_account,
+            commands::toggle_antigravity_auto_switch,
+            commands::get_antigravity_oauth_url,
+            commands::start_antigravity_oauth_login,
+            commands::complete_antigravity_oauth_code,
+            commands::export_antigravity_accounts,
+            commands::import_antigravity_accounts,
+            commands::refresh_all_antigravity_accounts,
+            commands::scan_local_antigravity_accounts,
+            commands::get_antigravity_live_session,
+            commands::sync_antigravity_session,
+            commands::get_proxy_status,
+            commands::test_proxy_prompt,
+            commands::clear_proxy_logs,
         ])
         .run(tauri::generate_context!())
         .expect("AI Usage Hub failed to start");

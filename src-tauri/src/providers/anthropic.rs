@@ -171,17 +171,26 @@ struct CachedClaudeUsage {
 
 impl CachedClaudeUsage {
     fn usage_values(&self) -> Vec<UsageValue> {
+        let now = Utc::now().timestamp();
         [
             (
                 "claude_300m_remaining",
                 "Shared 5-hour window",
-                self.five_hour_used,
+                if self.five_hour_reset.is_some_and(|ts| now >= ts) {
+                    Some(0.0)
+                } else {
+                    self.five_hour_used
+                },
                 self.five_hour_reset,
             ),
             (
                 "claude_10080m_remaining",
                 "Shared weekly window",
-                self.seven_day_used,
+                if self.seven_day_reset.is_some_and(|ts| now >= ts) {
+                    Some(0.0)
+                } else {
+                    self.seven_day_used
+                },
                 self.seven_day_reset,
             ),
         ]
