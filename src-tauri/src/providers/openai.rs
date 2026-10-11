@@ -188,12 +188,17 @@ fn disconnected_summary(now: i64) -> ProviderSummary {
 
 fn to_usage(window: &RateLimitWindow, fallback: &str, now: i64) -> UsageValue {
     let duration = window.window_duration_mins;
+    let used_percent = if window.resets_at.is_some_and(|ts| now >= ts) {
+        0 // Window has reset; quota fully restored!
+    } else {
+        window.used_percent
+    };
     UsageValue {
         metric: duration
             .map(|minutes| format!("codex_{minutes}m_remaining"))
             .unwrap_or_else(|| format!("codex_{fallback}_remaining")),
         label: window_label(duration, fallback),
-        value: Some(f64::from((100 - window.used_percent).clamp(0, 100))),
+        value: Some(f64::from((100 - used_percent).clamp(0, 100))),
         max_value: Some(100.0),
         unit: "% remaining".into(),
         source: UsageSource::OfficialCli,

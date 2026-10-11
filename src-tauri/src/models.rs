@@ -203,6 +203,50 @@ pub struct SecurityStatus {
     pub provider_credentials_stored: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityQuotaDetails {
+    pub gemini_5h: Option<f64>,
+    pub gemini_weekly: Option<f64>,
+    pub gemini_reset_at: Option<i64>,
+    pub claude_5h: Option<f64>,
+    pub claude_weekly: Option<f64>,
+    pub claude_reset_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityAccount {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub id_token: Option<String>,
+    pub project_id: Option<String>,
+    pub expiry_timestamp: i64,
+    pub status: String,
+    pub is_current: bool,
+    pub last_used: i64,
+    pub quota_remaining_percent: Option<f64>,
+    #[serde(default)]
+    pub quota_details: Option<AntigravityQuotaDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityLiveSession {
+    pub is_running: bool,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub plan: Option<String>,
+    pub source: String,
+    pub port: Option<u16>,
+    pub verified_at: i64,
+    pub quota_details: Option<AntigravityQuotaDetails>,
+    pub quota_remaining_percent: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
@@ -218,6 +262,10 @@ pub struct AppSettings {
     pub notify_critical_percent: u8,
     pub notify_on_reset: bool,
     pub notify_on_provider_error: bool,
+    pub antigravity_auto_switch: bool,
+    pub antigravity_switch_threshold: u8,
+    pub antigravity_switch_on_rate_limit: bool,
+    pub antigravity_switch_strategy: String,
 }
 
 impl Default for AppSettings {
@@ -235,6 +283,10 @@ impl Default for AppSettings {
             notify_critical_percent: 10,
             notify_on_reset: true,
             notify_on_provider_error: true,
+            antigravity_auto_switch: false,
+            antigravity_switch_threshold: 5,
+            antigravity_switch_on_rate_limit: true,
+            antigravity_switch_strategy: "highest_quota".into(),
         }
     }
 }

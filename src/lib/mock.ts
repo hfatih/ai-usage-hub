@@ -1,4 +1,4 @@
-import type { AccountSummary, AppSettings, DashboardSnapshot, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, AntigravityAccount, AppSettings, DashboardSnapshot, SecurityStatus, UsageHistoryPoint } from "../types";
 
 export const developmentSnapshot: DashboardSnapshot = {
   providers: [
@@ -81,7 +81,54 @@ export const developmentSettings: AppSettings = {
   notifyCriticalPercent: 10,
   notifyOnReset: true,
   notifyOnProviderError: true,
+  antigravityAutoSwitch: false,
+  antigravitySwitchThreshold: 5,
+  antigravitySwitchOnRateLimit: true,
+  antigravitySwitchStrategy: "highest_quota",
 };
+
+export const developmentAntigravityAccounts: AntigravityAccount[] = [
+  {
+    id: "dev-antigravity-1",
+    email: "primary.dev@gmail.com",
+    displayName: "Primary Developer",
+    accessToken: "mock_token_1",
+    refreshToken: "mock_refresh_1",
+    idToken: null,
+    projectId: null,
+    expiryTimestamp: Math.floor(Date.now() / 1000) + 3600,
+    status: "healthy",
+    isCurrent: true,
+    lastUsed: Math.floor(Date.now() / 1000),
+    quotaRemainingPercent: 88,
+    quotaDetails: {
+      gemini5h: 88,
+      geminiWeekly: 74,
+      claude5h: 92,
+      claudeWeekly: 65,
+    },
+  },
+  {
+    id: "dev-antigravity-2",
+    email: "secondary.backup@gmail.com",
+    displayName: "Secondary Backup",
+    accessToken: "mock_token_2",
+    refreshToken: "mock_refresh_2",
+    idToken: null,
+    projectId: null,
+    expiryTimestamp: Math.floor(Date.now() / 1000) + 7200,
+    status: "healthy",
+    isCurrent: false,
+    lastUsed: Math.floor(Date.now() / 1000) - 86400,
+    quotaRemainingPercent: 95,
+    quotaDetails: {
+      gemini5h: 95,
+      geminiWeekly: 90,
+      claude5h: 100,
+      claudeWeekly: 85,
+    },
+  },
+];
 
 export const developmentAccounts: AccountSummary[] = [
   {

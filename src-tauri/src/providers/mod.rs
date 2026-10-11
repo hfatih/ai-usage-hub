@@ -1,5 +1,5 @@
 mod anthropic;
-mod google;
+pub(crate) mod google;
 mod openai;
 mod opencode;
 

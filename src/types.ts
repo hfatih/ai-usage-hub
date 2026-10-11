@@ -108,6 +108,43 @@ export interface SecurityStatus {
   providerCredentialsStored: boolean;
 }
 
+export interface AntigravityQuotaDetails {
+  gemini5h?: number;
+  geminiWeekly?: number;
+  geminiResetAt?: number;
+  claude5h?: number;
+  claudeWeekly?: number;
+  claudeResetAt?: number;
+}
+
+export interface AntigravityAccount {
+  id: string;
+  email: string;
+  displayName: string | null;
+  accessToken: string;
+  refreshToken: string;
+  idToken: string | null;
+  projectId: string | null;
+  expiryTimestamp: number;
+  status: string;
+  isCurrent: boolean;
+  lastUsed: number;
+  quotaRemainingPercent: number | null;
+  quotaDetails?: AntigravityQuotaDetails | null;
+}
+
+export interface AntigravityLiveSession {
+  isRunning: boolean;
+  email: string | null;
+  name: string | null;
+  plan: string | null;
+  source: string;
+  port: number | null;
+  verifiedAt: number;
+  quotaDetails: AntigravityQuotaDetails | null;
+  quotaRemainingPercent: number | null;
+}
+
 export interface AppSettings {
   launchAtStartup: boolean;
   minimizeToTray: boolean;
@@ -121,4 +158,32 @@ export interface AppSettings {
   notifyCriticalPercent: number;
   notifyOnReset: boolean;
   notifyOnProviderError: boolean;
+  antigravityAutoSwitch: boolean;
+  antigravitySwitchThreshold: number;
+  antigravitySwitchOnRateLimit: boolean;
+  antigravitySwitchStrategy: string;
 }
+
+export interface ProxyRequestLog {
+  id: string;
+  timestamp: number;
+  clientProtocol: string;
+  requestedModel: string;
+  upstreamModel: string;
+  accountEmail: string;
+  latencyMs: number;
+  statusCode: number;
+  isStream: boolean;
+}
+
+export interface ProxyStatus {
+  running: boolean;
+  port: number;
+  totalRequests: number;
+  successRequests: number;
+  failedRequests: number;
+  lastLatencyMs: number;
+  activeAccountEmail: string | null;
+  recentLogs?: ProxyRequestLog[];
+}
+

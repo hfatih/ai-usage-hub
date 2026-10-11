@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AccountSummary, ActivityEvent, AppSettings, DashboardSnapshot, SecurityStatus, UsageHistoryPoint } from "../types";
-import { developmentAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
+import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
 
@@ -43,4 +43,89 @@ export const api = {
   },
   setExecutable: (appId: string, executablePath: string): Promise<void> =>
     call("set_app_executable", { appId, executablePath }),
+  antigravityAccounts: (): Promise<AntigravityAccount[]> =>
+    inTauri() ? call("get_antigravity_accounts") : Promise.resolve(structuredClone(developmentAntigravityAccounts)),
+  captureAntigravityAccount: (): Promise<AntigravityAccount> =>
+    inTauri() ? call("capture_current_antigravity_account") : Promise.resolve(developmentAntigravityAccounts[0]),
+  addAntigravityAccount: (email: string, refreshToken: string): Promise<AntigravityAccount> =>
+    inTauri() ? call("add_antigravity_account", { email, refreshToken }) : Promise.resolve({
+      id: `antigravity:${email}`,
+      email,
+      displayName: null,
+      accessToken: "mock",
+      refreshToken,
+      idToken: null,
+      projectId: null,
+      expiryTimestamp: Math.floor(Date.now() / 1000) + 3600,
+      status: "active",
+      isCurrent: false,
+      lastUsed: Math.floor(Date.now() / 1000),
+      quotaRemainingPercent: 100,
+    }),
+  deleteAntigravityAccount: (accountId: string): Promise<boolean> =>
+    inTauri() ? call("delete_antigravity_account", { accountId }) : Promise.resolve(true),
+  switchAntigravityAccount: (accountId: string): Promise<AntigravityAccount> =>
+    inTauri() ? call("switch_antigravity_account", { accountId }) : Promise.resolve(developmentAntigravityAccounts[0]),
+  toggleAntigravityAutoSwitch: (enabled: boolean): Promise<boolean> =>
+    inTauri() ? call("toggle_antigravity_auto_switch", { enabled }) : Promise.resolve(enabled),
+  getAntigravityOAuthUrl: (): Promise<string> =>
+    inTauri() ? call("get_antigravity_oauth_url") : Promise.resolve("https://accounts.google.com/mock"),
+  startAntigravityOAuthLogin: (): Promise<AntigravityAccount> =>
+    inTauri() ? call("start_antigravity_oauth_login") : Promise.resolve(developmentAntigravityAccounts[0]),
+  completeAntigravityOAuthCode: (code: string): Promise<AntigravityAccount> =>
+    inTauri() ? call("complete_antigravity_oauth_code", { code }) : Promise.resolve(developmentAntigravityAccounts[0]),
+  exportAntigravityAccounts: (): Promise<string> =>
+    inTauri() ? call("export_antigravity_accounts") : Promise.resolve("[]"),
+  importAntigravityAccounts: (jsonData: string): Promise<number> =>
+    inTauri() ? call("import_antigravity_accounts", { jsonData }) : Promise.resolve(0),
+  refreshAllAntigravityAccounts: (): Promise<AntigravityAccount[]> =>
+    inTauri() ? call("refresh_all_antigravity_accounts") : Promise.resolve(developmentAntigravityAccounts),
+  scanLocalAntigravityAccounts: (): Promise<AntigravityAccount[]> =>
+    inTauri() ? call("scan_local_antigravity_accounts") : Promise.resolve(developmentAntigravityAccounts),
+  getAntigravityLiveSession: (): Promise<AntigravityLiveSession> =>
+    inTauri()
+      ? call("get_antigravity_live_session")
+      : Promise.resolve({
+          isRunning: true,
+          email: "xfaythai@gmail.com",
+          name: "Fatih",
+          plan: "Google AI Pro",
+          source: "LanguageServer (Mock)",
+          port: 63251,
+          verifiedAt: Math.floor(Date.now() / 1000),
+          quotaDetails: null,
+          quotaRemainingPercent: 82,
+        }),
+  syncAntigravitySession: (): Promise<AntigravityLiveSession> =>
+    inTauri()
+      ? call("sync_antigravity_session")
+      : Promise.resolve({
+          isRunning: true,
+          email: "xfaythai@gmail.com",
+          name: "Fatih",
+          plan: "Google AI Pro",
+          source: "LanguageServer (Mock)",
+          port: 63251,
+          verifiedAt: Math.floor(Date.now() / 1000),
+          quotaDetails: null,
+          quotaRemainingPercent: 82,
+        }),
+  proxyStatus: (): Promise<ProxyStatus> =>
+    inTauri()
+      ? call("get_proxy_status")
+      : Promise.resolve({
+          running: true,
+          port: 8046,
+          totalRequests: 0,
+          successRequests: 0,
+          failedRequests: 0,
+          lastLatencyMs: 0,
+          activeAccountEmail: "mock@gmail.com",
+        }),
+  testProxyPrompt: (prompt: string, model?: string): Promise<{ text: string; latencyMs: number }> =>
+    inTauri()
+      ? call("test_proxy_prompt", { prompt, model })
+      : Promise.resolve({ text: "Simulated response from mock proxy.", latencyMs: 280 }),
+  clearProxyLogs: (): Promise<boolean> =>
+    inTauri() ? call("clear_proxy_logs") : Promise.resolve(true),
 };
