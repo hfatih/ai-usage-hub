@@ -3,6 +3,16 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [0.1.18] - 2026-10-12
+
+- Authoritative 3-tier live session detection for Google Antigravity accounts.
+- Zero-restart instant hot-switching and automatic 429 rate-limit rotation.
+- High-performance local AI API Proxy Gateway on port 8046 (OpenAI & Anthropic dual-protocol relay).
+- Full support for Claude 3.7 Sonnet reasoning budget and silent background downgrading.
+- Rolling 5-hour quota sliding window calculations.
+- Refined card starlight visual density with organic 4-pointed sparkles and soft stardust dots.
+- Complete bilingual documentation suite (TR | EN) and SVG UI tour gallery.
+
 ## [0.1.17] - 2026-09-24
 
 - Anchor account card actions to the bottom of each grid-stretched card, leaving

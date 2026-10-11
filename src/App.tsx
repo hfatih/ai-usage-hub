@@ -7,6 +7,7 @@ import { ActivityPage } from "./pages/ActivityPage";
 import { AppsPage } from "./pages/AppsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { AccountsPage } from "./pages/AccountsPage";
+import { ProxyPage } from "./pages/ProxyPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { SecurityPage } from "./pages/SecurityPage";
@@ -52,6 +53,7 @@ export default function App() {
   const content = {
     dashboard: <DashboardPage onNavigate={setPage} />,
     accounts: <AccountsPage />,
+    proxy: <ProxyPage />,
     apps: <AppsPage />,
     usage: <UsagePage />,
     activity: <ActivityPage />,

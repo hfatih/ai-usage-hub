@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="900" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b0f17"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1e293b" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="btnGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#ec4899"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#10b981"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Window -->
+  <rect width="900" height="520" rx="16" fill="url(#bg)" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- Titlebar -->
+  <rect width="900" height="42" rx="16" fill="#0f172a"/>
+  <rect y="30" width="900" height="12" fill="#0f172a"/>
+  <line x1="0" y1="42" x2="900" y2="42" stroke="#1e293b" stroke-width="1"/>
+  <circle cx="24" cy="21" r="5.5" fill="#ef4444"/>
+  <circle cx="42" cy="21" r="5.5" fill="#f59e0b"/>
+  <circle cx="60" cy="21" r="5.5" fill="#10b981"/>
+  <text x="450" y="26" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" text-anchor="middle">AI Usage Hub — Antigravity Multi-Account Matrix &amp; Live Hot-Switcher</text>
+
+  <!-- Navigation Bar -->
+  <rect x="24" y="60" width="852" height="46" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+  <text x="45" y="88" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="14" font-weight="700">AI Usage Hub</text>
+  <text x="200" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Dashboard</text>
+  <rect x="250" y="70" width="80" height="26" rx="6" fill="#ec4899" fill-opacity="0.15"/>
+  <text x="290" y="87" fill="#f43f5e" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle">Accounts</text>
+  <text x="365" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">API Proxy</text>
+  <text x="445" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Integrations</text>
+  <text x="540" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Settings</text>
+  <rect x="730" y="70" width="130" height="26" rx="6" fill="#10b981" fill-opacity="0.15" stroke="#10b981" stroke-width="0.8"/>
+  <circle cx="745" cy="83" r="3.5" fill="#10b981"/>
+  <text x="795" y="87" fill="#34d399" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">Pool Status: 3 Ready</text>
+
+  <!-- Live Session Banner Card -->
+  <g transform="translate(24, 118)">
+    <rect width="852" height="66" rx="10" fill="#0f172a" stroke="#047857" stroke-width="1.2"/>
+    <circle cx="28" cy="33" r="6" fill="#10b981"/>
+    <circle cx="28" cy="33" r="10" fill="#10b981" fill-opacity="0.2"/>
+    <text x="50" y="27" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="13" font-weight="700">Authoritative Antigravity Live Session: dev.lead@agency.io</text>
+    <text x="50" y="48" fill="#6ee7b7" font-family="system-ui, sans-serif" font-size="11">Tier 1 Active: LanguageServer IPC (Port 53218) · Process PID 14208 · Synchronized</text>
+    
+    <rect x="710" y="18" width="125" height="30" rx="6" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-width="1"/>
+    <text x="772" y="38" fill="#34d399" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle">Active in Editor</text>
+  </g>
+
+  <!-- Account Cards Grid -->
+  <g transform="translate(24, 196)">
+    <!-- Account Card 1 (Active) -->
+    <rect x="0" y="0" width="272" height="250" rx="10" fill="url(#cardGrad)" stroke="#059669" stroke-width="1.5"/>
+    <rect x="14" y="14" width="70" height="20" rx="4" fill="#10b981" fill-opacity="0.2"/>
+    <text x="49" y="28" fill="#34d399" font-family="system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle">ACTIVE NOW</text>
+    <text x="14" y="56" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">dev.lead@agency.io</text>
+    <text x="14" y="74" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Work Workspace · Google OAuth</text>
+
+    <!-- Quota 1 -->
+    <text x="14" y="104" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Flash</text>
+    <text x="258" y="104" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">94%</text>
+    <rect x="14" y="110" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="14" y="110" width="229" height="6" rx="3" fill="#38bdf8"/>
+
+    <!-- Quota 2 -->
+    <text x="14" y="138" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Pro</text>
+    <text x="258" y="138" fill="#818cf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">72%</text>
+    <rect x="14" y="144" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="14" y="144" width="175" height="6" rx="3" fill="#818cf8"/>
+
+    <!-- Quota 3 -->
+    <text x="14" y="172" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Claude 3.7 Sonnet (Thinking)</text>
+    <text x="258" y="172" fill="#f43f5e" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">48%</text>
+    <rect x="14" y="178" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="14" y="178" width="117" height="6" rx="3" fill="#f43f5e"/>
+
+    <rect x="14" y="202" width="244" height="34" rx="6" fill="#1e293b"/>
+    <text x="136" y="223" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">Reset Window: 2h 45m left</text>
+
+    <!-- Account Card 2 (Standby) -->
+    <rect x="290" y="0" width="272" height="250" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <rect x="304" y="14" width="76" height="20" rx="4" fill="#38bdf8" fill-opacity="0.15"/>
+    <text x="342" y="28" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="10" font-weight="600" text-anchor="middle">STANDBY POOL</text>
+    <text x="304" y="56" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">alex.personal@gmail.com</text>
+    <text x="304" y="74" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Personal Account · High Quota</text>
+
+    <!-- Quota 1 -->
+    <text x="304" y="104" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Flash</text>
+    <text x="548" y="104" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">100%</text>
+    <rect x="304" y="110" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="304" y="110" width="244" height="6" rx="3" fill="#38bdf8"/>
+
+    <!-- Quota 2 -->
+    <text x="304" y="138" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Pro</text>
+    <text x="548" y="138" fill="#818cf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">95%</text>
+    <rect x="304" y="144" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="304" y="144" width="231" height="6" rx="3" fill="#818cf8"/>
+
+    <!-- Quota 3 -->
+    <text x="304" y="172" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Claude 3.7 Sonnet (Thinking)</text>
+    <text x="548" y="172" fill="#f43f5e" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">85%</text>
+    <rect x="304" y="178" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="304" y="178" width="207" height="6" rx="3" fill="#f43f5e"/>
+
+    <rect x="304" y="202" width="244" height="34" rx="6" fill="url(#btnGrad)"/>
+    <text x="426" y="223" fill="#ffffff" font-family="system-ui, sans-serif" font-size="12" font-weight="700" text-anchor="middle">⚡ Hot-Switch to this Account</text>
+
+    <!-- Account Card 3 (Standby) -->
+    <rect x="580" y="0" width="272" height="250" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <rect x="594" y="14" width="86" height="20" rx="4" fill="#a855f7" fill-opacity="0.15"/>
+    <text x="637" y="28" fill="#c084fc" font-family="system-ui, sans-serif" font-size="10" font-weight="600" text-anchor="middle">AUTO-FAILOVER</text>
+    <text x="594" y="56" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">team.research@org.net</text>
+    <text x="594" y="74" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Research Pool · Rate-limit Backup</text>
+
+    <!-- Quota 1 -->
+    <text x="594" y="104" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Flash</text>
+    <text x="838" y="104" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">88%</text>
+    <rect x="594" y="110" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="594" y="110" width="214" height="6" rx="3" fill="#38bdf8"/>
+
+    <!-- Quota 2 -->
+    <text x="594" y="138" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Gemini 2.5 Pro</text>
+    <text x="838" y="138" fill="#818cf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">60%</text>
+    <rect x="594" y="144" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="594" y="144" width="146" height="6" rx="3" fill="#818cf8"/>
+
+    <!-- Quota 3 -->
+    <text x="594" y="172" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="11">Claude 3.7 Sonnet (Thinking)</text>
+    <text x="838" y="172" fill="#f43f5e" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="end">90%</text>
+    <rect x="594" y="178" width="244" height="6" rx="3" fill="#1e293b"/>
+    <rect x="594" y="178" width="219" height="6" rx="3" fill="#f43f5e"/>
+
+    <rect x="594" y="202" width="244" height="34" rx="6" fill="#1e293b" stroke="#334155"/>
+    <text x="716" y="223" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle">⚡ Hot-Switch to this Account</text>
+  </g>
+
+  <!-- Bottom Pills -->
+  <g transform="translate(24, 464)">
+    <rect width="852" height="36" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <text x="20" y="22" fill="#64748b" font-family="system-ui, sans-serif" font-size="11">FEATURES:</text>
+    <text x="90" y="22" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11" font-weight="600">✓ Zero-Restart Hot Switch</text>
+    <text x="270" y="22" fill="#a855f7" font-family="system-ui, sans-serif" font-size="11" font-weight="600">✓ 429 Rate-Limit Auto-Rotation</text>
+    <text x="490" y="22" fill="#10b981" font-family="system-ui, sans-serif" font-size="11" font-weight="600">✓ Rolling 5-Hour Quota Math</text>
+    <text x="700" y="22" fill="#f59e0b" font-family="system-ui, sans-serif" font-size="11" font-weight="600">✓ Anti-403 Isolation</text>
+  </g>
+</svg>

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="900" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b0f17"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1e293b" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#0f172a" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="antigravityGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#ec4899"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Window -->
+  <rect width="900" height="520" rx="16" fill="url(#bg)" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- Titlebar -->
+  <rect width="900" height="42" rx="16" fill="#0f172a"/>
+  <rect y="30" width="900" height="12" fill="#0f172a"/>
+  <line x1="0" y1="42" x2="900" y2="42" stroke="#1e293b" stroke-width="1"/>
+  <circle cx="24" cy="21" r="5.5" fill="#ef4444"/>
+  <circle cx="42" cy="21" r="5.5" fill="#f59e0b"/>
+  <circle cx="60" cy="21" r="5.5" fill="#10b981"/>
+  <text x="450" y="26" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" text-anchor="middle">AI Usage Hub — Dashboard &amp; Overview</text>
+
+  <!-- Navigation Bar -->
+  <rect x="24" y="60" width="852" height="46" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+  <text x="45" y="88" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="14" font-weight="700">AI Usage Hub</text>
+  <rect x="180" y="70" width="70" height="26" rx="6" fill="#38bdf8" fill-opacity="0.15"/>
+  <text x="215" y="87" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle">Dashboard</text>
+  <text x="285" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Accounts</text>
+  <text x="365" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">API Proxy</text>
+  <text x="445" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Integrations</text>
+  <text x="540" y="87" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="12">Settings</text>
+  <rect x="760" y="70" width="100" height="26" rx="6" fill="#10b981" fill-opacity="0.15" stroke="#10b981" stroke-width="0.8"/>
+  <circle cx="776" cy="83" r="3.5" fill="#10b981"/>
+  <text x="815" y="87" fill="#34d399" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">Local · Private</text>
+
+  <!-- Summary Row Cards -->
+  <g transform="translate(24, 120)">
+    <rect width="200" height="74" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <text x="16" y="32" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">RUNNING APPS</text>
+    <text x="16" y="60" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="24" font-weight="700">3 Active</text>
+    <text x="110" y="60" fill="#10b981" font-family="system-ui, sans-serif" font-size="11">● Antigravity, Claude</text>
+
+    <rect x="217" width="200" height="74" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <text x="233" y="32" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">TODAY'S APP RUNTIME</text>
+    <text x="233" y="60" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="24" font-weight="700">4h 12m</text>
+    <text x="330" y="60" fill="#64748b" font-family="system-ui, sans-serif" font-size="11">Local tracking</text>
+
+    <rect x="434" width="200" height="74" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <text x="450" y="32" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">PROXY RELAY</text>
+    <text x="450" y="60" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="24" font-weight="700">Port 8046</text>
+    <text x="560" y="60" fill="#34d399" font-family="system-ui, sans-serif" font-size="11">● 99.4% Ok</text>
+
+    <rect x="652" width="200" height="74" rx="10" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <text x="668" y="32" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">TELEMETRY &amp; DATA</text>
+    <text x="668" y="60" fill="#10b981" font-family="system-ui, sans-serif" font-size="20" font-weight="700">Zero Cloud</text>
+    <text x="770" y="60" fill="#64748b" font-family="system-ui, sans-serif" font-size="11">SQLite WAL</text>
+  </g>
+
+  <!-- Provider Cards -->
+  <g transform="translate(24, 210)">
+    <!-- Google Antigravity Card -->
+    <rect width="270" height="280" rx="12" fill="url(#cardGrad)" stroke="#38bdf8" stroke-width="1.2"/>
+    <rect x="16" y="16" width="34" height="34" rx="8" fill="#ec4899" fill-opacity="0.2"/>
+    <text x="33" y="39" fill="#f43f5e" font-family="system-ui, sans-serif" font-size="16" font-weight="700" text-anchor="middle">G</text>
+    <text x="60" y="30" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">Google / Antigravity</text>
+    <text x="60" y="46" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11">primary.dev@gmail.com · Pro</text>
+    <rect x="186" y="16" width="68" height="22" rx="11" fill="#10b981" fill-opacity="0.2"/>
+    <text x="220" y="31" fill="#34d399" font-family="system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle">● CONNECTED</text>
+
+    <!-- Quotas -->
+    <text x="16" y="80" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Gemini Models (5H Capacity)</text>
+    <text x="235" y="80" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">82%</text>
+    <rect x="16" y="88" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="16" y="88" width="195" height="6" rx="3" fill="#38bdf8"/>
+
+    <text x="16" y="122" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Claude Sonnet &amp; Opus (5H)</text>
+    <text x="235" y="122" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">100%</text>
+    <rect x="16" y="130" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="16" y="130" width="238" height="6" rx="3" fill="#10b981"/>
+
+    <text x="16" y="164" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Weekly Overall Limit</text>
+    <text x="235" y="164" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">86%</text>
+    <rect x="16" y="172" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="16" y="172" width="205" height="6" rx="3" fill="#818cf8"/>
+
+    <text x="16" y="206" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Imagen 3 Generation (1:1)</text>
+    <text x="235" y="206" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">82%</text>
+    <rect x="16" y="214" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="16" y="214" width="195" height="6" rx="3" fill="#ec4899"/>
+
+    <rect x="16" y="238" width="238" height="28" rx="6" fill="#0f172a" stroke="#334155"/>
+    <text x="135" y="256" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">⚡ Auto-Switch Matrix Active</text>
+
+    <!-- OpenAI Codex Card -->
+    <rect x="290" width="270" height="280" rx="12" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <rect x="306" y="16" width="34" height="34" rx="8" fill="#10b981" fill-opacity="0.2"/>
+    <text x="323" y="39" fill="#10b981" font-family="system-ui, sans-serif" font-size="16" font-weight="700" text-anchor="middle">O</text>
+    <text x="350" y="30" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">ChatGPT / Codex</text>
+    <text x="350" y="46" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Plus / Team Plan</text>
+    <rect x="476" y="16" width="68" height="22" rx="11" fill="#10b981" fill-opacity="0.2"/>
+    <text x="510" y="31" fill="#34d399" font-family="system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle">● CONNECTED</text>
+
+    <text x="306" y="80" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Shared 5-Hour Window</text>
+    <text x="525" y="80" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">94%</text>
+    <rect x="306" y="88" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="306" y="88" width="224" height="6" rx="3" fill="#10b981"/>
+
+    <text x="306" y="122" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Shared Weekly Allowance</text>
+    <text x="525" y="122" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">89%</text>
+    <rect x="306" y="130" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="306" y="130" width="212" height="6" rx="3" fill="#10b981"/>
+
+    <text x="306" y="164" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Local Token Counter (24h)</text>
+    <text x="525" y="164" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">142.8k</text>
+
+    <rect x="306" y="238" width="238" height="28" rx="6" fill="#0f172a" stroke="#334155"/>
+    <text x="425" y="256" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">Verified Official Quota Source</text>
+
+    <!-- Claude Desktop Card -->
+    <rect x="580" width="270" height="280" rx="12" fill="url(#cardGrad)" stroke="#1e293b"/>
+    <rect x="596" y="16" width="34" height="34" rx="8" fill="#d97706" fill-opacity="0.2"/>
+    <text x="613" y="39" fill="#f59e0b" font-family="system-ui, sans-serif" font-size="16" font-weight="700" text-anchor="middle">C</text>
+    <text x="640" y="30" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="14" font-weight="700">Claude Desktop &amp; Code</text>
+    <text x="640" y="46" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Pro Plan Active</text>
+    <rect x="766" y="16" width="68" height="22" rx="11" fill="#10b981" fill-opacity="0.2"/>
+    <text x="800" y="31" fill="#34d399" font-family="system-ui, sans-serif" font-size="10" font-weight="700" text-anchor="middle">● CONNECTED</text>
+
+    <text x="596" y="80" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Shared 5-Hour Session Quota</text>
+    <text x="815" y="80" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">76%</text>
+    <rect x="596" y="88" width="238" height="6" rx="3" fill="#334155"/>
+    <rect x="596" y="88" width="181" height="6" rx="3" fill="#f59e0b"/>
+
+    <text x="596" y="122" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Claude 3.7 Thinking Budget</text>
+    <text x="815" y="122" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">Supported</text>
+
+    <text x="596" y="164" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Local Token Counter (24h)</text>
+    <text x="815" y="164" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="12" font-weight="700">89.4k</text>
+
+    <rect x="596" y="238" width="238" height="28" rx="6" fill="#0f172a" stroke="#334155"/>
+    <text x="715" y="256" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11" font-weight="600" text-anchor="middle">Claude Code CLI Compatible</text>
+  </g>
+</svg>

@@ -41,7 +41,7 @@ export function resetTime(epochSeconds: number | null): string {
   if (!epochSeconds) return translate("Reset time unavailable");
   const absolute = formatDateTime(epochSeconds);
   const seconds = epochSeconds - Math.floor(Date.now() / 1000);
-  if (seconds <= 0) return translate("Reset due · {date}", currentLanguage(), { date: absolute });
+  if (seconds <= 0) return translate("Renewed · {date}", currentLanguage(), { date: absolute });
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.max(1, Math.floor((seconds % 3600) / 60));
@@ -67,7 +67,15 @@ export function isPercentageUsage(usage: UsageValue): boolean {
 
 export function formatUsageValue(usage: UsageValue): string {
   if (usage.value == null) return "—";
-  if (isPercentageUsage(usage)) return `${Math.round(usage.value)}%`;
+  let val = usage.value;
+  // If reset time has passed, quota is renewed back to 100%
+  if (usage.resetAt && Math.floor(Date.now() / 1000) >= usage.resetAt && isPercentageUsage(usage) && val <= 0) {
+    val = 100;
+  }
+  if (isPercentageUsage(usage)) {
+    if (val > 0 && val < 1) return "<1%";
+    return `${Math.round(val)}%`;
+  }
   if (usage.unit.toUpperCase() === "USD") {
     return new Intl.NumberFormat(currentLanguage() === "tr" ? "tr-TR" : "en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(usage.value);
   }
@@ -77,7 +85,11 @@ export function formatUsageValue(usage: UsageValue): string {
 
 export function usageProgress(usage: UsageValue): number | null {
   if (usage.value == null || usage.maxValue == null || usage.maxValue <= 0) return null;
-  return Math.min(100, Math.max(0, usage.value / usage.maxValue * 100));
+  let val = usage.value;
+  if (usage.resetAt && Math.floor(Date.now() / 1000) >= usage.resetAt && isPercentageUsage(usage) && val <= 0) {
+    val = 100;
+  }
+  return Math.min(100, Math.max(0, val / usage.maxValue * 100));
 }
 
 export function usageTiming(usage: UsageValue): string {
@@ -87,4 +99,15 @@ export function usageTiming(usage: UsageValue): string {
   if (usage.unit === "RPM") return translate("Per-minute ceiling");
   if (usage.source === "local_application" || usage.source === "locally_calculated") return translate("Local tracked total");
   return translate("No reset reported");
+}
+
+export function shortResetTime(epochSeconds: number | null): string {
+  if (!epochSeconds) return "";
+  const seconds = epochSeconds - Math.floor(Date.now() / 1000);
+  if (seconds <= 0) return currentLanguage() === "tr" ? "Yenilendi" : "Reset";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.max(1, Math.floor((seconds % 3600) / 60));
+  const tr = currentLanguage() === "tr";
+  if (hours > 0) return `${hours}${tr ? "sa" : "h"} ${minutes}${tr ? "dk" : "m"}`;
+  return `${minutes}${tr ? "dk" : "m"}`;
 }
