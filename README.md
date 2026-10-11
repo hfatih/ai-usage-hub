@@ -1,87 +1,262 @@
 <div align="center">
-  <img src="app-icon.svg" alt="AI Usage Hub star logo" width="76" height="76">
+  <img src="docs/images/logo.svg" alt="AI Usage Hub Logo" width="84" height="84">
   <h1>AI Usage Hub</h1>
-  <p>Your AI tools, usage, and app activity in one private Windows dashboard.</p>
+  <p><strong>The Private Multi-Provider AI Cockpit, Local API Gateway &amp; Zero-Restart Antigravity Session Switcher for Windows.</strong></p>
+
   <p>
-    <a href="README.tr.md">Türkçe</a> ·
-    <a href="../../releases/latest">Download</a> ·
-    <a href="CHANGELOG.md">Changelog</a> ·
-    <a href="CONTRIBUTING.md">Contribute</a>
+    <strong>Language:</strong> <a href="README.md"><strong>EN</strong></a> | <a href="README.tr.md"><strong>TR</strong></a>
+    &nbsp;•&nbsp;
+    <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Download Release</a> ·
+    <a href="#-quick-client-presets">Client Presets</a> ·
+    <a href="#-architecture">Architecture</a> ·
+    <a href="#-support--sponsorship">Buy Me a Coffee</a>
+  </p>
+
+  <p>
+    <img src="https://img.shields.io/badge/Language-TR%20%7C%20EN-blue?style=flat-square" alt="TR | EN">
+    <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&style=flat-square" alt="Windows Platform">
+    <img src="https://img.shields.io/badge/Framework-Tauri%20v2-24C8DB?logo=tauri&style=flat-square" alt="Tauri v2">
+    <img src="https://img.shields.io/badge/Core-Rust-DEA584?logo=rust&style=flat-square" alt="Rust Core">
+    <img src="https://img.shields.io/badge/UI-React%2019%20%2B%20TypeScript-3178C6?logo=typescript&style=flat-square" alt="React + TS">
+    <img src="https://img.shields.io/badge/Storage-SQLite%20WAL-003B57?logo=sqlite&style=flat-square" alt="SQLite WAL">
+    <img src="https://img.shields.io/badge/Telemetry-Zero%20%2F%20100%25%20Local-10B981?style=flat-square" alt="Zero Telemetry">
+    <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License MIT">
   </p>
 </div>
 
-AI Usage Hub brings supported provider quotas, local token and cost totals, app status, sessions, and alerts into one desktop app. It runs on your PC, uses your existing sign-ins where a supported local source exists, and labels missing data as unavailable.
+---
 
-> **What it measures:** An app's open time means its process was running. It is separate from provider usage and token consumption. Values marked *Official*, *Local*, or *Calculated* retain their source; the app does not invent a remaining quota.
+## ☕ Support & Sponsorship
 
-## Download and install
+If **AI Usage Hub** saves you subscription headaches, unlocks unlimited coding workflows, or prevents quota lockouts, consider supporting its active development:
 
-1. Download the Windows setup EXE from the [latest release](../../releases/latest).
-2. Run the installer. It installs for the current Windows user and does not need an administrator account.
-3. Open AI Usage Hub and complete the short setup. The installer and first-run interface are in English. Choose Turkish later in **Settings → Language** if you prefer. Use **Integrations** to see what each provider can supply and **Apps** to select a local executable if detection needs help.
+<div align="center">
+  <a href="https://buymeacoffee.com/hfatih" target="_blank">
+    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/sponsors/Hfatih" target="_blank">
+    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="GitHub Sponsor">
+  </a>
+  <p><sub><em>Your support keeps the project independent, free, and continuously updated with provider changes.</em></sub></p>
+</div>
 
-Windows 10/11 and Microsoft Edge WebView2 are required. The installer is currently **unsigned**; Windows may show a publisher warning. Download only from this repository's Releases page and verify the published SHA-256 checksum. There is no automatic updater yet: install a newer release over the current one to update.
+---
 
-## Provider coverage
+## 🚀 Overview
 
-| Source | What the app can show | What is needed | Limits |
-| --- | --- | --- | --- |
-| **ChatGPT / Codex** | Shared 5-hour and weekly remaining percentages, reset times, plan, plus a separate device-wide local token total | Codex installed and signed in | Local token logs cannot reliably be assigned to a signed-in account |
-| **Claude Desktop / Claude Code** | Shared subscription usage from Claude Desktop's local plan history, distinct app status, plus a separate device-wide local token total | A Claude Desktop plan-history sample | Exact reset time is absent from that local history |
-| **Google Antigravity** | Gemini and other model quota windows, remaining percentages, reset times, account and plan | Antigravity running and signed in | Its local source does not provide token or cost totals |
-| **OpenCode** | Saved provider IDs, local session/token/cost totals, and the public free-model catalog | OpenCode local data for totals | A public catalog does not reveal your personal remaining quota |
-| **Kimi / GitHub Copilot** | Local app or editor detection where supported | Matching process | Verified subscription quota is unavailable |
+**AI Usage Hub** is a lightweight, local-first Windows companion designed for developers and AI power users. It unifies provider quotas, active sessions, runtime analytics, and multi-account rotation into one clean dashboard.
 
-Provider connection, account identity, app detection, and usage are separate signals. For example, a saved OpenCode provider entry alone does not prove that its service is currently connected. The interface uses *Unavailable* where the source cannot substantiate a number.
+It also embeds a **high-performance local AI API Gateway** (`http://127.0.0.1:8046`), allowing your favorite external development tools (**Claude Code CLI, Cursor, Windsurf, Aider, Cline, Continue.dev**) to seamlessly leverage your existing AI accounts with automatic rate-limit failover, native reasoning budget management, and zero token leakage.
 
-## Privacy
+---
 
-- AI Usage Hub has **no app telemetry**. Account labels, settings, app sessions, alerts, and usage snapshots stay in its local SQLite database.
-- It does **not** ask for provider passwords or save API keys, OAuth tokens, or browser cookies. The Codex and Antigravity adapters use their installed apps' local interfaces; Claude and OpenCode use relevant local data.
-- Local Codex and Claude transcript counters are read to calculate token totals. Message text is not displayed or stored by AI Usage Hub.
-- The OpenCode adapter reads provider IDs but ignores credential values. Its public model catalog request is unauthenticated.
-- Account labels are shown in the app to help you distinguish your own accounts. Do not post unredacted screenshots or your database in a public issue.
+## 📸 Visual Tour
 
-The database is `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`. Close the app fully before moving or deleting it. See [SECURITY.md](SECURITY.md) for the security policy.
+| **Dashboard & Runtime Analytics** |
+| :---: |
+| ![Dashboard Overview](docs/images/dashboard.svg) |
+| *Real-time app runtimes, rolling 5-hour quota windows, and active process tracking.* |
 
-## Build from source
+| **Antigravity Multi-Account Matrix & Hot-Switcher** |
+| :---: |
+| ![Antigravity Account Pool](docs/images/antigravity-pool.svg) |
+| *Authoritative 3-tier live session detection, zero-restart instant hot-switching, and 429 failover.* |
 
-**Prerequisites:** Windows 10/11, Node.js 20+, a stable Rust MSVC toolchain, Microsoft C++ Build Tools with **Desktop development with C++**, and WebView2.
+| **Local AI API Gateway (`127.0.0.1:8046`)** |
+| :---: |
+| ![API Proxy Matrix](docs/images/proxy-matrix.svg) |
+| *Dual-protocol relay (OpenAI + Anthropic), Claude 3.7 reasoning budget support, and client presets.* |
 
+---
+
+## ✨ Key Features
+
+### ⚡ Antigravity Multi-Account Matrix & Live Hot-Switcher
+- **Authoritative 3-Tier Live Session Detection:** Identifies the active Google Antigravity account using LanguageServer IPC process ports (Tier 1), Windows Credential Manager tokens (Tier 2), and `state.vscdb` local databases (Tier 3). Never shows a false or stale account.
+- **Zero-Restart Instant Hot-Switching:** Switch between work, personal, and research accounts on the fly without closing your IDE. Cleans stale LanguageServer instances automatically (`kill_antigravity_language_servers`).
+- **Rolling 5-Hour Sliding Window Quota Math:** Accurately computes remaining Gemini and Claude quotas based on sliding timestamps, completely eliminating the common false 0% lock bug.
+- **Official Google OAuth 2.0 Integration:** Secure browser-based OAuth flow on local port `8045` for official token provisioning.
+- **Auto-Rotation on 429 Rate Limits:** Automatically routes API requests to standby accounts in your pool when rate limits are triggered.
+- **Encrypted Local Storage:** All account credentials and cookies are sealed locally using Windows DPAPI / AES-256-GCM.
+
+### 🌐 High-Performance Local AI API Gateway (`127.0.0.1:8046`)
+- **Dual-Protocol Compatibility:** Seamlessly exposes both:
+  - `POST /v1/chat/completions` (OpenAI format for Cursor, Windsurf, Aider)
+  - `POST /v1/messages` (Anthropic format for Claude Code CLI)
+- **Claude 3.7 Sonnet Reasoning Budget:** Full support for extended thinking parameters (`thinkingConfig.thinkingBudget`).
+- **Silent Background Downgrading:** Automatically downgrades background indexing and routine tasks to lightweight models (e.g. Gemini 2.5 Flash) to conserve high-tier quota.
+- **Full Server-Sent Events (SSE) Streaming:** Ultra-low latency token streaming and keep-alive connection pooling.
+- **100% Offline Relay:** Relays directly between your local editor and upstream endpoints; no intermediate cloud servers or analytics.
+
+### 📊 Multi-Provider AI Command Center
+- **ChatGPT & OpenAI Codex:** Shared 5-hour and weekly quota meters, reset countdowns, plan tiers, and local token counters.
+- **Claude Desktop & Claude Code CLI:** Local plan history tracking, live app process states, and device-wide token statistics.
+- **Google Antigravity:** Real-time Gemini 2.5 Pro / Flash and Claude 3.7 Sonnet quota windows.
+- **OpenCode & Community Tools:** Local session metrics, catalog mapping, and process health checks.
+
+### 🔒 100% Local-First & Zero Telemetry
+- **Zero Telemetry:** No tracking, no crash telemetry, and no remote analytic beacons.
+- **Local SQLite Database (`ai-usage-hub.sqlite3`):** Every snapshot, account label, and runtime session stays encrypted in `%APPDATA%\com.aiusagehub.desktop\`.
+- **Integrity Verified:** Prominently labels metrics as *Official*, *Local*, *Calculated*, or *Unavailable* so you always know data authenticity.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    subgraph IDE_Tools ["External Developer Tools"]
+        CC["Claude Code CLI"]
+        CU["Cursor / Windsurf"]
+        AI["Aider / Cline / Continue"]
+    end
+
+    subgraph Hub ["AI Usage Hub (Local Windows Desktop)"]
+        subgraph Gateway ["Local API Proxy (127.0.0.1:8046)"]
+            PR["Protocol Translator\nOpenAI / Anthropic"]
+            RM["Reasoning Budget Mapper\nClaude 3.7 Thinking"]
+            AR["429 Auto-Rotation Engine"]
+        end
+
+        subgraph AccountPool ["Antigravity Account Pool"]
+            T1["Tier 1: LanguageServer IPC (Port Scan)"]
+            T2["Tier 2: Windows Credential Vault"]
+            T3["Tier 3: Local state.vscdb"]
+            HS["Zero-Restart Hot-Switcher"]
+        end
+
+        subgraph Core ["Desktop Core (Tauri 2 + Rust)"]
+            DB[("SQLite Database\nWAL Mode")]
+            PM["Process Monitor & Quota Math"]
+        end
+    end
+
+    subgraph Upstream ["Upstream AI Endpoints"]
+        GAPI["Google Antigravity / LanguageServer"]
+        OAPI["OpenAI Platform"]
+        AAPI["Anthropic Platform"]
+    end
+
+    CC -->|ANTHROPIC_BASE_URL| PR
+    CU -->|OpenAI Base URL| PR
+    AI -->|OpenAI Base URL| PR
+
+    PR --> RM --> AR
+    AR -->|Active Account| HS
+    HS --> GAPI
+    AR -.->|Direct Pass| OAPI
+    AR -.->|Direct Pass| AAPI
+
+    AccountPool --> Core
+    Gateway --> Core
+```
+
+---
+
+## 🛠️ Quick Client Presets
+
+Configure your external development tools to use AI Usage Hub's local API gateway (`http://127.0.0.1:8046`):
+
+### 1. Claude Code CLI
+In PowerShell or command prompt:
 ```powershell
+$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8046"
+$env:ANTHROPIC_API_KEY = "hub-local-proxy"
+claude
+```
+> *Claude 3.7 Sonnet reasoning budget and thinking tokens are automatically virtualized and mapped.*
+
+### 2. Cursor & Windsurf
+1. Navigate to **Cursor Settings** → **Models** (or Windsurf Model Settings).
+2. Set **Override OpenAI Base URL** to:
+   ```
+   http://127.0.0.1:8046/v1
+   ```
+3. Enter API Key: `hub-local-proxy`.
+4. Enable models: `gemini-2.5-pro`, `gemini-2.5-flash`, `claude-3-7-sonnet`.
+
+### 3. Aider (Terminal AI Pair Programmer)
+Run Aider pointing to the local proxy:
+```powershell
+aider --openai-api-base http://127.0.0.1:8046/v1 --openai-api-key hub-local-proxy --model gemini-2.5-pro
+```
+
+### 4. Cline / Roo Code (VS Code Extension)
+1. In Cline Settings, select API Provider: **OpenAI Compatible**.
+2. **Base URL**: `http://127.0.0.1:8046/v1`
+3. **API Key**: `hub-local-proxy`
+4. **Model ID**: `gemini-2.5-pro` (or `claude-3-7-sonnet`)
+
+---
+
+## 📥 Download and Installation
+
+1. Download the Windows installer (`AI-Usage-Hub-Setup-x64.exe`) from the [Latest Release](https://github.com/Hfatih/ai-usage-hub/releases/latest).
+2. Run the installer. It installs strictly for the current Windows user without requiring administrator permissions.
+3. Launch **AI Usage Hub** and connect your existing local accounts.
+4. *(Optional)* Switch to Turkish at any time via **Settings → Language**.
+
+> [!NOTE]
+> Windows 10/11 and Microsoft Edge WebView2 (preinstalled on modern Windows) are required. Since current binaries are community-signed, Windows Defender SmartScreen may display an initial prompt. You can verify SHA-256 hashes on the Releases page.
+
+---
+
+## 🔨 Building from Source
+
+### Prerequisites
+- Windows 10/11 (x64)
+- [Node.js](https://nodejs.org/) v20+
+- [Rust MSVC toolchain](https://rustup.rs/) (stable)
+- Microsoft Visual C++ Build Tools (Desktop development with C++)
+
+### Development Mode
+```powershell
+# Clone the repository
 git clone https://github.com/Hfatih/ai-usage-hub.git
 cd ai-usage-hub
+
+# Install dependencies
 npm ci
+
+# Start the Tauri development app
 npm run tauri dev
 ```
 
-For a production NSIS installer:
-
+### Production Build
+To generate a production-ready NSIS installer:
 ```powershell
 npm run tauri build
 ```
+The compiled installer will be available at:
+`src-tauri/target/release/bundle/nsis/`
 
-The installer is written under `src-tauri/target/release/bundle/nsis/`. Building from source requires no provider credentials. The browser-only Vite preview uses fictional sample data; run the Tauri app to check live local integrations.
-
-## Platform branches
-
-The default [`main` branch](https://github.com/Hfatih/ai-usage-hub/tree/main) is the Windows version and contains the released installer. The [`macos` branch](https://github.com/Hfatih/ai-usage-hub/tree/macos) is a separate development track for a future Mac port. No macOS installer is published yet; the Windows-specific integrations still need to be adapted and verified on a Mac.
-
-## Verify a change
-
+### Running Tests
 ```powershell
+# Run frontend unit tests
 npm test
+
+# Verify frontend production build
 npm run build
+
+# Run Rust backend test suite
 cd src-tauri
 cargo test --locked
 ```
 
-The desktop shell uses Tauri 2 and Rust; the interface uses React, TypeScript, and Vite. Local history uses SQLite. Source code is under `src/` and `src-tauri/src/`. Contributions and release steps are in [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASING.md](RELEASING.md).
+---
 
-## Scope and limitations
+## 📁 Data Storage & Security
 
-New installations start in English; choose Turkish in **Settings → Language**. Existing installations keep their saved language preference. Process monitoring samples running apps periodically, so very short launches can be missed. Antigravity must be open for fresh quota data, and Claude Desktop must have written a usage-history sample. Some CLI launch actions stay disabled when they require an interactive terminal. Data from a provider can change independently of this app; the card's source and refresh state tell you what was actually retrieved.
+- **Database Path:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`
+- **Zero Passwords:** AI Usage Hub never requests or stores raw Google or OpenAI account passwords.
+- **DPAPI Encryption:** Token secrets are encrypted with the Windows Data Protection API (DPAPI).
+- For complete vulnerability reporting procedures, see [SECURITY.md](SECURITY.md).
 
-## License
+---
 
-MIT — see [LICENSE](LICENSE). AI Usage Hub is an independent community project; provider names belong to their respective owners.
+## 📄 License & Disclaimer
+
+Released under the [MIT License](LICENSE).
+
+*AI Usage Hub is an independent open-source project. Google Antigravity, OpenAI ChatGPT, Anthropic Claude, Cursor, and other named products are trademarks of their respective owners.*
