@@ -3,6 +3,13 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [0.1.23] - 2026-10-12
+
+- Proxy key check now fails closed: a request is refused when settings cannot
+  be read or no key is stored, and keys are compared in constant time.
+- A pool account deleted while its quota was being refreshed, or during a
+  switch, is no longer written back together with its tokens.
+
 ## [0.1.22] - 2026-10-12
 
 - Encrypt Antigravity sign-in tokens in the local database with Windows data
