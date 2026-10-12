@@ -224,7 +224,7 @@ Bu dal, aynı uygulamanın yerel bir Mac sürümünü içerir. **Henüz yayımla
 | Pencere | Özel başlık çubuğu | Yerel trafik ışıkları; kapatınca menü çubuğuna gizlenir, Dock simgesi geri getirir |
 | Oturum açılışında başlatma | Kayıt defteri | Giriş öğesi (LaunchAgent) |
 
-Bir Mac'te henüz doğrulanmayanlar: Antigravity'nin macOS sürümünün oturumunu `gemini` / `antigravity` Anahtar Zinciri kaydında tutması (biçim, dil sunucusunun kullandığı Go keyring kitaplığıyla aynıdır), Codex uygulamasının CLI'ı nerede taşıdığı ve Antigravity'nin yerel portunu bulmak için okunan dil sunucusu günlüğünün yeri.
+Bir Mac'te henüz doğrulanmayanlar: Antigravity'nin macOS sürümünün oturumunu `gemini` / `antigravity` Anahtar Zinciri kaydında tutması (biçim, dil sunucusunun kullandığı Go keyring kitaplığıyla aynıdır) ve Codex uygulamasının CLI'ı nerede taşıdığı. Antigravity'nin yerel portu dil sunucusu günlüğünden, günlük bulunamazsa dil sunucusunun dinlediği portlardan (`lsof`) okunur.
 
 ### Mac'te derleme
 

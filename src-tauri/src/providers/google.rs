@@ -387,10 +387,10 @@ fn find_antigravity_session() -> Option<LocalSession> {
             .with_cmd(sysinfo::UpdateKind::Always),
     );
 
-    let csrf_token = system
+    let (pid, csrf_token) = system
         .processes()
-        .values()
-        .find_map(|process| {
+        .iter()
+        .find_map(|(pid, process)| {
             let name_lower = process.name().to_string_lossy().to_ascii_lowercase();
             let executable = process
                 .exe()
@@ -403,12 +403,60 @@ fn find_antigravity_session() -> Option<LocalSession> {
                 return None;
             }
             command_value(process.cmd(), "--csrf_token")
-        })
-        .filter(|value| valid_csrf_token(value))?;
-    let port = antigravity_log_candidates()
+                .filter(|value| valid_csrf_token(value))
+                .map(|token| (pid.as_u32(), token))
+        })?;
+    if let Some(port) = antigravity_log_candidates()
         .into_iter()
-        .find_map(|path| https_port_from_log(&path))?;
-    Some(LocalSession { port, csrf_token })
+        .find_map(|path| https_port_from_log(&path))
+    {
+        return Some(LocalSession { port, csrf_token });
+    }
+    // No usable log (its location differs between Antigravity builds): ask the OS which ports the
+    // language server listens on and keep the one that answers as the HTTPS API.
+    let client = local_client()?;
+    listening_ports(pid).into_iter().find_map(|port| {
+        let session = LocalSession { port, csrf_token: csrf_token.clone() };
+        request::<UserStatusEnvelope>(&client, &session, STATUS_METHOD, json!({}))
+            .is_ok()
+            .then_some(session)
+    })
+}
+
+#[cfg(unix)]
+fn listening_ports(pid: u32) -> Vec<u16> {
+    let lsof = ["/usr/sbin/lsof", "/usr/bin/lsof"]
+        .into_iter()
+        .find(|path| std::path::Path::new(path).is_file())
+        .unwrap_or("lsof");
+    std::process::Command::new(lsof)
+        .args(["-nP", "-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN", "-Fn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|output| ports_from_lsof(&String::from_utf8_lossy(&output.stdout)))
+        .unwrap_or_default()
+}
+
+#[cfg(not(unix))]
+fn listening_ports(_pid: u32) -> Vec<u16> {
+    Vec::new()
+}
+
+/// Ports from `lsof -Fn` output, whose name lines look like `n127.0.0.1:53121` or `n*:53121`.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn ports_from_lsof(output: &str) -> Vec<u16> {
+    let mut ports = Vec::new();
+    for port in output
+        .lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .filter_map(|name| name.rsplit_once(':')?.1.parse::<u16>().ok())
+    {
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
+    ports
 }
 
 fn command_value(parts: &[std::ffi::OsString], flag: &str) -> Option<String> {
@@ -534,6 +582,13 @@ mod tests {
         let reported = json!({ "creditType": "GOOGLE_ONE_AI", "creditAmount": "750", "minimumCreditAmountForUsage": "50" });
         let rows = credit_usage(&status(reported), Some(1000.0), 0);
         assert_eq!(value(&rows, "google_one_ai_credits"), Some(750.0));
+    }
+
+    #[test]
+    fn listening_ports_are_read_from_lsof_names() {
+        let output = "p4242\nf12\nn127.0.0.1:53121\nf13\nn*:53122\nf14\nn[::1]:53121\nfbad\nnlocalhost:http\n";
+        assert_eq!(ports_from_lsof(output), vec![53121, 53122]);
+        assert!(ports_from_lsof("").is_empty());
     }
 
     #[test]
