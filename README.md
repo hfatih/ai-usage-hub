@@ -225,7 +225,7 @@ This branch contains a native Mac port of the same app. **There is no published 
 | Window | Custom title bar | Native traffic lights; closing hides to the menu bar, the Dock icon brings it back |
 | Start at login | Registry run key | Login item (LaunchAgent) |
 
-Not yet verified on a Mac: that Antigravity's macOS build keeps its sign-in in the `gemini` / `antigravity` Keychain item (the format matches the Go keyring library its language server uses), where the Codex app ships its CLI, and the language-server log location used to find Antigravity's local port.
+Not yet verified on a Mac: that Antigravity's macOS build keeps its sign-in in the `gemini` / `antigravity` Keychain item (the format matches the Go keyring library its language server uses), and where the Codex app ships its CLI. Antigravity's local port is read from its language-server log, or, when that log is not found, from the ports the language server listens on (`lsof`).
 
 ### Build on a Mac
 
