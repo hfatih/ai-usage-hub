@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
 const QUOTA_METHOD: &str = "RetrieveUserQuotaSummary";
 const STATUS_METHOD: &str = "GetUserStatus";
+const QUOTA_UNIT: &str = "% remaining";
 
 #[derive(Debug)]
 struct LocalSession {
@@ -48,23 +49,29 @@ struct UserTier {
     available_credits: Vec<TierCredit>,
 }
 
+// Credit numbers arrive as JSON numbers or int64 strings depending on the field, so they stay
+// untyped until `number` reads them.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TierCredit {
     credit_type: String,
-    minimum_credit_amount_for_usage: Option<String>,
+    credit_amount: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlanStatus {
     plan_info: Option<PlanInfo>,
+    available_prompt_credits: Option<Value>,
+    available_flow_credits: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlanInfo {
     plan_name: Option<String>,
+    monthly_prompt_credits: Option<Value>,
+    monthly_flow_credits: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,118 +102,7 @@ struct QuotaBucket {
     reset_time: Option<String>,
 }
 
-pub fn summary() -> Result<ProviderSummary> {
-    if let Ok(Some(session)) = find_antigravity_session() {
-        if let Ok(client) = Client::builder()
-            .danger_accept_invalid_certs(true)
-            .https_only(true)
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-        {
-            if let Ok(status) = request::<UserStatusEnvelope>(&client, &session, STATUS_METHOD, json!({})) {
-                if let Ok(quota) = request::<QuotaEnvelope>(&client, &session, QUOTA_METHOD, json!({ "forceRefresh": true })) {
-                    let now = Utc::now().timestamp();
-                    let mut usage = quota
-                        .response
-                        .groups
-                        .iter()
-                        .flat_map(|group| {
-                            group
-                                .buckets
-                                .iter()
-                                .map(move |bucket| to_usage(group, bucket, now))
-                        })
-                        .collect::<Vec<_>>();
-
-                    // Imagen 3 & Multimodal image generation metric
-                    let gemini_image_remaining = usage
-                        .iter()
-                        .find(|u| u.metric.contains("gemini-5h") || u.metric.contains("gemini_5h"))
-                        .or_else(|| usage.iter().find(|u| u.metric.contains("gemini")))
-                        .and_then(|u| u.value)
-                        .unwrap_or(100.0);
-
-                    usage.push(UsageValue {
-                        metric: "antigravity_image_generation".into(),
-                        label: "Imagen 3 & Multimodal · Image Generation (1:1)".into(),
-                        value: Some(gemini_image_remaining),
-                        max_value: Some(100.0),
-                        unit: "% remaining".into(),
-                        source: UsageSource::LocalApplication,
-                        confidence: Confidence::High,
-                        retrieved_at: now,
-                        reset_at: None,
-                    });
-
-                    // Flow Credits (availableCredits from Google One AI)
-                    if let Some(ref tier) = status.user_status.user_tier {
-                        for credit in &tier.available_credits {
-                            let amount = credit
-                                .minimum_credit_amount_for_usage
-                                .as_deref()
-                                .and_then(|s| s.parse::<f64>().ok())
-                                .unwrap_or(50.0);
-                            usage.push(UsageValue {
-                                metric: format!("google_credit_{}", credit.credit_type.to_lowercase()),
-                                label: format!("Google One AI · {} Credits (Flow)", credit.credit_type.replace('_', " ")),
-                                value: Some(amount),
-                                max_value: None,
-                                unit: "credits".into(),
-                                source: UsageSource::LocalApplication,
-                                confidence: Confidence::High,
-                                retrieved_at: now,
-                                reset_at: None,
-                            });
-                        }
-                    }
-
-                    if !usage.is_empty() {
-                        let email = status.user_status.email.filter(|value| !value.is_empty());
-                        let account_label = email
-                            .clone()
-                            .or(status.user_status.name)
-                            .unwrap_or_else(|| "Google account".into());
-                        let plan = status
-                            .user_status
-                            .user_tier
-                            .and_then(|value| value.name)
-                            .or_else(|| {
-                                status
-                                    .user_status
-                                    .plan_status
-                                    .and_then(|value| value.plan_info)
-                                    .and_then(|value| value.plan_name)
-                            })
-                            .filter(|value| !value.is_empty());
-                        let usage_allowed = usage
-                            .iter()
-                            .filter_map(|value| value.value)
-                            .any(|value| value > 0.0);
-
-                        return Ok(ProviderSummary {
-                            id: "google".into(),
-                            name: "Google / Antigravity".into(),
-                            account_key: email
-                                .as_deref()
-                                .map(|value| format!("email:{}", value.to_lowercase())),
-                            account_label,
-                            plan,
-                            connection_status: ConnectionStatus::Connected,
-                            capabilities: capabilities(),
-                            usage,
-                            usage_allowed: Some(usage_allowed),
-                            last_refresh: Some(now),
-                            error: None,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    summary_from_vault()
-}
-
+/// Account, plan and usage rows read from the running Antigravity language server.
 #[derive(Debug, Clone)]
 pub struct LiveSessionResult {
     pub email: Option<String>,
@@ -216,53 +112,152 @@ pub struct LiveSessionResult {
     pub usage: Vec<UsageValue>,
 }
 
-pub fn probe_antigravity_live_session() -> Option<LiveSessionResult> {
-    let session = find_antigravity_session().ok()??;
-    let client = Client::builder()
-        .danger_accept_invalid_certs(true)
-        .https_only(true)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .ok()?;
-    let status = request::<UserStatusEnvelope>(&client, &session, STATUS_METHOD, json!({})).ok()?;
-    let email = status.user_status.email.filter(|value| !value.is_empty());
-    let name = status.user_status.name.filter(|value| !value.is_empty());
+pub fn summary() -> Result<ProviderSummary> {
+    let Some(live) = live_session().filter(|live| live.usage.iter().any(|u| u.unit == QUOTA_UNIT))
+    else {
+        return summary_from_vault();
+    };
+    let usage_allowed = live
+        .usage
+        .iter()
+        .filter(|value| value.unit == QUOTA_UNIT)
+        .filter_map(|value| value.value)
+        .any(|value| value > 0.0);
+    Ok(ProviderSummary {
+        id: "google".into(),
+        name: "Google / Antigravity".into(),
+        account_key: live
+            .email
+            .as_deref()
+            .map(|value| format!("email:{}", value.to_lowercase())),
+        account_label: live
+            .email
+            .or(live.name)
+            .unwrap_or_else(|| "Google account".into()),
+        plan: live.plan,
+        connection_status: ConnectionStatus::Connected,
+        capabilities: capabilities(),
+        usage: live.usage,
+        usage_allowed: Some(usage_allowed),
+        last_refresh: Some(Utc::now().timestamp()),
+        error: None,
+    })
+}
+
+/// Reads the signed-in account, its quota windows and its credit balances from the running
+/// Antigravity language server. Returns `None` when Antigravity is closed or does not answer.
+pub fn live_session() -> Option<LiveSessionResult> {
+    let session = find_antigravity_session()?;
+    let client = local_client()?;
+    let status = request::<UserStatusEnvelope>(&client, &session, STATUS_METHOD, json!({}))
+        .ok()?
+        .user_status;
+    let now = Utc::now().timestamp();
+    let mut usage = request::<QuotaEnvelope>(&client, &session, QUOTA_METHOD, json!({ "forceRefresh": true }))
+        .map(|quota| {
+            quota
+                .response
+                .groups
+                .iter()
+                .flat_map(|group| group.buckets.iter().map(move |bucket| to_usage(group, bucket, now)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    usage.extend(credit_usage(&status, crate::antigravity::read_vscdb_ai_credits(), now));
+
     let plan = status
-        .user_status
         .user_tier
         .and_then(|value| value.name)
-        .or_else(|| {
-            status
-                .user_status
-                .plan_status
-                .and_then(|value| value.plan_info)
-                .and_then(|value| value.plan_name)
-        })
+        .or_else(|| status.plan_status.and_then(|value| value.plan_info).and_then(|value| value.plan_name))
         .filter(|value| !value.is_empty());
-
-    let mut usage = Vec::new();
-    if let Ok(quota) = request::<QuotaEnvelope>(&client, &session, QUOTA_METHOD, json!({ "forceRefresh": true })) {
-        let now = Utc::now().timestamp();
-        usage = quota
-            .response
-            .groups
-            .iter()
-            .flat_map(|group| {
-                group
-                    .buckets
-                    .iter()
-                    .map(move |bucket| to_usage(group, bucket, now))
-            })
-            .collect();
-    }
-
     Some(LiveSessionResult {
-        email,
-        name,
+        email: status.email.filter(|value| !value.is_empty()),
+        name: status.name.filter(|value| !value.is_empty()),
         plan,
         port: session.port,
         usage,
     })
+}
+
+/// Email of the account the running language server is signed in with; a single local request,
+/// cheap enough to poll while waiting for an account switch to land.
+pub fn live_account_email() -> Option<String> {
+    let session = find_antigravity_session()?;
+    request::<UserStatusEnvelope>(&local_client()?, &session, STATUS_METHOD, json!({}))
+        .ok()?
+        .user_status
+        .email
+        .filter(|value| !value.is_empty())
+}
+
+fn local_client() -> Option<Client> {
+    Client::builder()
+        .danger_accept_invalid_certs(true)
+        .https_only(true)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .ok()
+}
+
+fn number(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| value.as_str()?.parse().ok())
+}
+
+/// Credit balances the language server reports. The Google One AI balance is often missing from
+/// the response; `stored_ai_credits` (Antigravity's own saved state) fills it in, at lower
+/// confidence, but only for a tier that lists that credit type.
+fn credit_usage(status: &UserStatus, stored_ai_credits: Option<f64>, now: i64) -> Vec<UsageValue> {
+    let row = |metric: &str, label: &str, value: f64, max_value: Option<f64>, confidence| UsageValue {
+        metric: metric.into(),
+        label: label.into(),
+        value: Some(value),
+        max_value,
+        unit: "credits".into(),
+        source: UsageSource::LocalApplication,
+        confidence,
+        retrieved_at: now,
+        reset_at: None,
+    };
+    let mut rows = Vec::new();
+
+    let ai_credit = status
+        .user_tier
+        .iter()
+        .flat_map(|tier| &tier.available_credits)
+        .find(|credit| credit.credit_type == "GOOGLE_ONE_AI");
+    if let Some(credit) = ai_credit {
+        let reported = credit.credit_amount.as_ref().and_then(number);
+        if let Some((value, confidence)) = reported
+            .map(|value| (value, Confidence::High))
+            .or(stored_ai_credits.map(|value| (value, Confidence::Medium)))
+        {
+            rows.push(row("google_one_ai_credits", "Google One AI · AI credits", value, None, confidence));
+        }
+    }
+
+    if let Some(plan) = &status.plan_status {
+        let info = plan.plan_info.as_ref();
+        for (metric, label, available, monthly) in [
+            (
+                "antigravity_prompt_credits",
+                "Antigravity · Prompt credits",
+                &plan.available_prompt_credits,
+                info.and_then(|info| info.monthly_prompt_credits.as_ref()),
+            ),
+            (
+                "antigravity_flow_credits",
+                "Antigravity · Flow credits",
+                &plan.available_flow_credits,
+                info.and_then(|info| info.monthly_flow_credits.as_ref()),
+            ),
+        ] {
+            if let Some(value) = available.as_ref().and_then(number) {
+                let max_value = monthly.and_then(number).filter(|max| *max > 0.0 && *max >= value);
+                rows.push(row(metric, label, value, max_value, Confidence::High));
+            }
+        }
+    }
+    rows
 }
 
 fn summary_from_vault() -> Result<ProviderSummary> {
@@ -323,7 +318,8 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         name: "Google / Antigravity".into(),
         account_key: email.as_deref().map(|value| format!("email:{}", value.to_lowercase())),
         account_label,
-        plan: Some("Antigravity Pro".into()),
+        // The quota endpoint does not report the subscription tier.
+        plan: None,
         connection_status: ConnectionStatus::Connected,
         capabilities: capabilities(),
         usage,
@@ -373,7 +369,7 @@ fn to_usage(group: &QuotaGroup, bucket: &QuotaBucket, now: i64) -> UsageValue {
         label: format!("{} · {}", group.display_name, bucket.display_name),
         value: Some((fraction * 100.0).clamp(0.0, 100.0)),
         max_value: Some(100.0),
-        unit: "% remaining".into(),
+        unit: QUOTA_UNIT.into(),
         source: UsageSource::LocalApplication,
         confidence: Confidence::High,
         retrieved_at: now,
@@ -381,7 +377,7 @@ fn to_usage(group: &QuotaGroup, bucket: &QuotaBucket, now: i64) -> UsageValue {
     }
 }
 
-fn find_antigravity_session() -> Result<Option<LocalSession>> {
+fn find_antigravity_session() -> Option<LocalSession> {
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
@@ -391,30 +387,28 @@ fn find_antigravity_session() -> Result<Option<LocalSession>> {
             .with_cmd(sysinfo::UpdateKind::Always),
     );
 
-    let token = system.processes().values().find_map(|process| {
-        let name_lower = process.name().to_string_lossy().to_ascii_lowercase();
-        let executable = process
-            .exe()
-            .map(|path| path.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        let is_ls = name_lower.starts_with("language_server") || name_lower == "language_server.exe";
-        let is_antigravity = executable.contains("antigravity")
-            || process.cmd().iter().any(|c| c.to_string_lossy().to_ascii_lowercase().contains("antigravity"));
-        if !is_ls || !is_antigravity {
-            return None;
-        }
-        command_value(process.cmd(), "--csrf_token")
-    });
-    let Some(csrf_token) = token.filter(|value| valid_csrf_token(value)) else {
-        return Ok(None);
-    };
-    let Some(port) = antigravity_log_candidates()
+    let csrf_token = system
+        .processes()
+        .values()
+        .find_map(|process| {
+            let name_lower = process.name().to_string_lossy().to_ascii_lowercase();
+            let executable = process
+                .exe()
+                .map(|path| path.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            let is_ls = name_lower.starts_with("language_server");
+            let is_antigravity = executable.contains("antigravity")
+                || process.cmd().iter().any(|c| c.to_string_lossy().to_ascii_lowercase().contains("antigravity"));
+            if !is_ls || !is_antigravity {
+                return None;
+            }
+            command_value(process.cmd(), "--csrf_token")
+        })
+        .filter(|value| valid_csrf_token(value))?;
+    let port = antigravity_log_candidates()
         .into_iter()
-        .find_map(|path| https_port_from_log(&path))
-    else {
-        return Ok(None);
-    };
-    Ok(Some(LocalSession { port, csrf_token }))
+        .find_map(|path| https_port_from_log(&path))?;
+    Some(LocalSession { port, csrf_token })
 }
 
 fn command_value(parts: &[std::ffi::OsString], flag: &str) -> Option<String> {
@@ -437,15 +431,19 @@ fn valid_csrf_token(value: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
+/// Language server logs of every Antigravity flavour, most recently written first: the running
+/// server is the one still appending, and a leftover log from the other flavour holds a dead port.
 fn antigravity_log_candidates() -> Vec<PathBuf> {
     let Some(app_data) = env::var_os("APPDATA") else {
         return Vec::new();
     };
     let root = PathBuf::from(app_data);
-    vec![
+    let mut logs = vec![
         root.join("Antigravity/logs/language_server.log"),
         root.join("Antigravity IDE/logs/language_server.log"),
-    ]
+    ];
+    logs.sort_by_key(|path| std::cmp::Reverse(fs::metadata(path).and_then(|meta| meta.modified()).ok()));
+    logs
 }
 
 fn https_port_from_log(path: &PathBuf) -> Option<u16> {
@@ -504,6 +502,41 @@ mod tests {
         assert_eq!(value.source, UsageSource::LocalApplication);
     }
 
+    // Shape of a real GetUserStatus response: the tier lists the credit type with only its
+    // usage threshold, never a balance.
+    fn status(tier_credit: Value) -> UserStatus {
+        serde_json::from_value::<UserStatusEnvelope>(json!({ "userStatus": {
+            "email": "user@example.com",
+            "planStatus": {
+                "planInfo": { "planName": "Pro", "monthlyPromptCredits": 50000, "monthlyFlowCredits": 150000 },
+                "availablePromptCredits": 500,
+                "availableFlowCredits": 100
+            },
+            "userTier": { "name": "Google AI Pro", "availableCredits": [tier_credit] }
+        }}))
+        .unwrap()
+        .user_status
+    }
+
+    #[test]
+    fn credits_never_show_the_usage_threshold_as_a_balance() {
+        let threshold_only = json!({ "creditType": "GOOGLE_ONE_AI", "minimumCreditAmountForUsage": "50" });
+        let value = |rows: &[UsageValue], metric: &str| rows.iter().find(|row| row.metric == metric).and_then(|row| row.value);
+
+        let rows = credit_usage(&status(threshold_only.clone()), None, 0);
+        assert_eq!(value(&rows, "google_one_ai_credits"), None);
+        assert_eq!(value(&rows, "antigravity_prompt_credits"), Some(500.0));
+        assert_eq!(value(&rows, "antigravity_flow_credits"), Some(100.0));
+        assert!(rows.iter().all(|row| row.validate().is_ok()));
+
+        let rows = credit_usage(&status(threshold_only), Some(1000.0), 0);
+        assert_eq!(value(&rows, "google_one_ai_credits"), Some(1000.0));
+
+        let reported = json!({ "creditType": "GOOGLE_ONE_AI", "creditAmount": "750", "minimumCreditAmountForUsage": "50" });
+        let rows = credit_usage(&status(reported), Some(1000.0), 0);
+        assert_eq!(value(&rows, "google_one_ai_credits"), Some(750.0));
+    }
+
     #[test]
     fn command_values_support_split_and_equals_forms() {
         let split = ["server.exe", "--csrf_token", "abc-def-0123456789"]
@@ -527,10 +560,10 @@ mod tests {
     #[test]
     #[ignore = "requires running Antigravity app"]
     fn test_find_session() {
-        let sess = find_antigravity_session().unwrap();
-        println!("FOUND SESSION: {:?}", sess);
+        let sess = find_antigravity_session();
+        println!("FOUND SESSION: {:?}", sess.map(|session| session.port));
         let s = summary().expect("summary should succeed");
-        println!("SUMMARY: account_label={}, plan={:?}, usage count={}", s.account_label, s.plan, s.usage.len());
+        println!("SUMMARY: plan={:?}, usage count={}", s.plan, s.usage.len());
         for u in &s.usage {
             println!("  -> metric={} label={} value={:?} reset_at={:?}", u.metric, u.label, u.value, u.reset_at);
         }

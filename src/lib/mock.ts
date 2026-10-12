@@ -85,6 +85,10 @@ export const developmentSettings: AppSettings = {
   antigravitySwitchThreshold: 5,
   antigravitySwitchOnRateLimit: true,
   antigravitySwitchStrategy: "highest_quota",
+  desktopNotifications: true,
+  proxyApiKey: "sk-hub-preview-0000000000000000",
+  proxyRequireKey: true,
+  proxyModelMap: [{ from: "gpt-4*", to: "gemini-3.6-flash-high" }],
 };
 
 export const developmentAntigravityAccounts: AntigravityAccount[] = [
@@ -160,4 +164,5 @@ export const developmentSecurity: SecurityStatus = {
   usageSnapshotCount: developmentUsageHistory.length,
   storedSecretCount: 0,
   providerCredentialsStored: false,
+  secretsEncrypted: true,
 };

@@ -2,7 +2,7 @@
   "name": "ai-usage-hub",
   "private": true,
   "license": "MIT",
-  "version": "0.1.18",
+  "version": "0.1.22",
   "type": "module",
   "scripts": {
     "dev": "vite",

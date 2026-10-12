@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
 import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
@@ -87,7 +87,7 @@ export const api = {
       ? call("get_antigravity_live_session")
       : Promise.resolve({
           isRunning: true,
-          email: "xfaythai@gmail.com",
+          email: "primary.dev@gmail.com",
           name: "Fatih",
           plan: "Google AI Pro",
           source: "LanguageServer (Mock)",
@@ -101,7 +101,7 @@ export const api = {
       ? call("sync_antigravity_session")
       : Promise.resolve({
           isRunning: true,
-          email: "xfaythai@gmail.com",
+          email: "primary.dev@gmail.com",
           name: "Fatih",
           plan: "Google AI Pro",
           source: "LanguageServer (Mock)",
@@ -122,6 +122,10 @@ export const api = {
           lastLatencyMs: 0,
           activeAccountEmail: "mock@gmail.com",
         }),
+  regenerateProxyApiKey: (): Promise<AppSettings> =>
+    inTauri() ? call("regenerate_proxy_api_key") : Promise.resolve({ ...developmentSettings, proxyApiKey: "sk-hub-preview-" + Date.now().toString(16) }),
+  proxyModels: (): Promise<ProxyModel[]> =>
+    inTauri() ? call("get_proxy_models") : Promise.resolve([]),
   testProxyPrompt: (prompt: string, model?: string): Promise<{ text: string; latencyMs: number }> =>
     inTauri()
       ? call("test_proxy_prompt", { prompt, model })
