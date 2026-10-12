@@ -490,8 +490,10 @@ pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<Antigravit
             }
         }
 
-        let _ = lock(database)?.save_antigravity_account(&acc);
-        updated.push(acc);
+        // Not a plain save: the account may have been deleted while Google was answering.
+        if lock(database)?.update_antigravity_account(&acc).unwrap_or(false) {
+            updated.push(acc);
+        }
     }
 
     Ok(updated)
@@ -1128,7 +1130,7 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
             }
             Err(e) => {
                 account.status = "expired".into();
-                let _ = lock(database)?.save_antigravity_account(&account);
+                let _ = lock(database)?.update_antigravity_account(&account);
                 return Err(HubError::Operation(format!(
                     "Could not refresh token for {}: {}",
                     account.email, e
@@ -1188,7 +1190,12 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
         account.quota_details = Some(details);
     }
     let db = lock(database)?;
-    db.save_antigravity_account(&account)?;
+    if !db.update_antigravity_account(&account)? {
+        return Err(HubError::Operation(format!(
+            "{} was removed from the pool while switching; it was not added back.",
+            account.email
+        )));
+    }
     db.set_current_antigravity_account(&account.id)?;
 
     // 5. Record activity event

@@ -51,6 +51,14 @@ pub fn set_model_map(rules: Vec<ModelMapRule>) {
     }
 }
 
+/// Compares a presented key with the stored one without stopping at the first difference, so the
+/// response time does not reveal how much of the key was right. An empty stored key never matches.
+fn keys_match(presented: &str, expected: &str) -> bool {
+    !expected.is_empty()
+        && presented.len() == expected.len()
+        && presented.bytes().zip(expected.bytes()).fold(0u8, |difference, (a, b)| difference | (a ^ b)) == 0
+}
+
 fn mapped_model(input_model: &str, rules: &[ModelMapRule]) -> Option<String> {
     let input = input_model.to_ascii_lowercase();
     rules.iter().find_map(|rule| {
@@ -341,8 +349,13 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
     // Everything except the health check needs the proxy key (unless the user turned it off):
     // without it any program on this PC could spend the pooled accounts' quota.
     if !matches!(clean_path, "/" | "/health") {
-        let settings = state.database.lock().ok().and_then(|db| db.settings().ok()).unwrap_or_default();
-        if settings.proxy_require_key && !settings.proxy_api_key.is_empty() && presented_key.as_deref() != Some(settings.proxy_api_key.as_str()) {
+        // Fails closed: if the settings cannot be read, or a key is required but none is stored,
+        // nothing is let through.
+        let Some(settings) = state.database.lock().ok().and_then(|db| db.settings().ok()) else {
+            let err = json!({"error": {"code": 503, "message": "AI Usage Hub could not read its settings; try again."}});
+            return send_json_response(stream, 503, &err);
+        };
+        if settings.proxy_require_key && !keys_match(presented_key.as_deref().unwrap_or_default(), &settings.proxy_api_key) {
             let err = json!({"error": {"code": 401, "type": "authentication_error", "message": "Missing or wrong API key. Copy the key from AI Usage Hub > API Proxy."}});
             return send_json_response(stream, 401, &err);
         }
@@ -1523,6 +1536,16 @@ mod tests {
         ]}});
         assert_eq!(inline_images(&upstream), vec!["QUJD".to_string()]);
         assert!(inline_images(&json!({ "response": { "candidates": [] } })).is_empty());
+    }
+
+    #[test]
+    fn key_check_fails_closed() {
+        assert!(keys_match("sk-hub-abc", "sk-hub-abc"));
+        assert!(!keys_match("sk-hub-abd", "sk-hub-abc"));
+        assert!(!keys_match("sk-hub-ab", "sk-hub-abc"));
+        // No stored key means nobody gets in, not everybody.
+        assert!(!keys_match("", ""));
+        assert!(!keys_match("anything", ""));
     }
 
     #[test]

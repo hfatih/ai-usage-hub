@@ -713,6 +713,17 @@ impl Database {
         Ok(())
     }
 
+    /// Saves changes to an account only if it is still in the pool, and reports whether it was.
+    /// Callers that read an account, spend time on the network and then write it back use this
+    /// so an account deleted in the meantime is not re-created together with its tokens.
+    pub fn update_antigravity_account(&self, account: &AntigravityAccount) -> Result<bool> {
+        if self.antigravity_account(&account.id)?.is_none() {
+            return Ok(false);
+        }
+        self.save_antigravity_account(account)?;
+        Ok(true)
+    }
+
     pub fn set_current_antigravity_account(&self, id: &str) -> Result<()> {
         self.connection.execute("UPDATE antigravity_accounts SET is_current = 0", [])?;
         self.connection.execute(
@@ -1022,6 +1033,15 @@ mod tests {
         let loaded = database.antigravity_account(&account.id).unwrap().unwrap();
         assert_eq!((loaded.access_token.as_str(), loaded.refresh_token.as_str(), loaded.id_token.as_deref()), ("access-secret", "refresh-secret", Some("id-secret")));
         assert!(database.security_status().unwrap().secrets_encrypted);
+
+        // A stale copy written back after the account was deleted must not bring it back.
+        let mut stale = loaded.clone();
+        stale.status = "rate_limited".into();
+        assert!(database.update_antigravity_account(&stale).unwrap());
+        assert!(database.delete_antigravity_account(&account.id).unwrap());
+        assert!(!database.update_antigravity_account(&stale).unwrap());
+        assert!(database.antigravity_accounts().unwrap().is_empty());
+        database.save_antigravity_account(&account).unwrap();
 
         // A row written by an older version in plain text is upgraded by the migration.
         database.connection.execute("UPDATE antigravity_accounts SET refresh_token = 'old-plain'", []).unwrap();

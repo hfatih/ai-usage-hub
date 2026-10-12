@@ -1,5 +1,8 @@
 # Bug fix history
 
+- 2026-10-12: Proxy authentication fell open when the settings read failed or the stored key was empty; it now returns 503/401 and uses a constant-time comparison (v0.1.23).
+- 2026-10-12: Refresh and switch paths saved an account with an upsert after an unlocked network call, re-creating an account (and its tokens) deleted in between; they now use `update_antigravity_account`, which only writes existing rows (v0.1.23).
+
 - 2026-10-12: Security page hard-coded `stored_secret_count: 0` and said no provider secrets were stored while the Antigravity pool keeps OAuth tokens in SQLite; the count is now queried and the page describes the tokens, the keyless 127.0.0.1 proxy and exports (v0.1.21).
 - 2026-10-12: Proxy test panel and `/v1/models` listed a fixed set of outdated model names plus a non-existent `imagen-3`; the list now comes from `fetchAvailableModels` (v0.1.21).
 
