@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
@@ -425,8 +428,14 @@ pub fn export_antigravity_accounts_json(database: &Database) -> Result<String> {
         .map_err(|e| HubError::Operation(format!("Export JSON serialization failed: {}", e)))
 }
 
+fn lock(database: &Mutex<Database>) -> Result<MutexGuard<'_, Database>> {
+    database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))
+}
+
 /// Import Antigravity accounts from JSON string, refresh quota and health, save to DB
-pub fn import_antigravity_accounts_json(database: &Database, json_str: &str) -> Result<usize> {
+pub fn import_antigravity_accounts_json(database: &Mutex<Database>, json_str: &str) -> Result<usize> {
     let accounts: Vec<AntigravityAccount> = serde_json::from_str(json_str)
         .map_err(|e| HubError::Operation(format!("Invalid import JSON format: {}", e)))?;
     let mut count = 0;
@@ -435,82 +444,172 @@ pub fn import_antigravity_accounts_json(database: &Database, json_str: &str) -> 
             acc.quota_remaining_percent = Some(quota);
             acc.quota_details = Some(details);
         }
-        database.save_antigravity_account(&acc)?;
+        lock(database)?.save_antigravity_account(&acc)?;
         count += 1;
     }
     Ok(count)
 }
 
-/// Refresh all Antigravity accounts in database: refreshes tokens near expiry,
-/// pulls fresh quota from Google CloudCode PA API, auto-heals rate-limited accounts if recovered,
-/// and returns the updated accounts list.
-pub fn refresh_all_accounts(database: &Database) -> Result<Vec<AntigravityAccount>> {
-    let accounts = database.antigravity_accounts()?;
+/// Refreshes every pooled account that has a saved sign-in: renews tokens near expiry and pulls
+/// fresh quota from Google. The database lock is taken only around each save, never across the
+/// network calls, so the rest of the app stays responsive while Google is slow.
+pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<AntigravityAccount>> {
+    let accounts = lock(database)?.antigravity_accounts()?;
     let mut updated = Vec::new();
     let now = Utc::now().timestamp();
 
     for mut acc in accounts {
-        // Refresh token if expiring within 60s
-        if acc.expiry_timestamp <= now + 60 && !acc.refresh_token.is_empty() {
+        // Accounts seen only through the live session have no token to ask Google with.
+        if acc.refresh_token.is_empty() {
+            updated.push(acc);
+            continue;
+        }
+        if acc.expiry_timestamp <= now + 60 {
             if let Ok(token_resp) = refresh_google_oauth_token(&acc.refresh_token) {
                 acc.access_token = token_resp.access_token;
                 acc.expiry_timestamp = now + token_resp.expires_in;
+                if let Some(refresh_token) = token_resp.refresh_token {
+                    acc.refresh_token = refresh_token;
+                }
                 if let Some(id_tok) = token_resp.id_token {
                     acc.id_token = Some(id_tok);
                 }
             }
         }
 
-        // Pull latest Google PA quota summary
-        if let Some((quota, details)) = fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref()) {
-            acc.quota_remaining_percent = Some(quota);
-            acc.quota_details = Some(details);
-            if quota > 0.0 && acc.status == "rate_limited" {
-                acc.status = "healthy".into();
+        match fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref()) {
+            Some((quota, details)) => {
+                acc.quota_remaining_percent = Some(quota);
+                acc.quota_details = Some(details);
+                if acc.status != "forbidden" {
+                    acc.status = if quota <= 0.0 { "rate_limited" } else { "healthy" }.into();
+                }
+            }
+            None => {
+                heal_if_reset(&mut acc, now);
             }
         }
 
-        let _ = database.save_antigravity_account(&acc);
+        let _ = lock(database)?.save_antigravity_account(&acc);
         updated.push(acc);
     }
 
     Ok(updated)
 }
 
-/// Reads saved account information from Antigravity's state.vscdb storage
-pub fn read_vscdb_antigravity_account() -> Option<(String, Option<String>)> {
-    let appdata = std::env::var_os("APPDATA")?;
-    let candidates = [
-        std::path::PathBuf::from(&appdata).join("Antigravity/User/globalStorage/state.vscdb"),
-        std::path::PathBuf::from(&appdata).join("Antigravity IDE/User/globalStorage/state.vscdb"),
-    ];
+/// Clears a `rate_limited` flag once the quota window that caused it has rolled over, so an
+/// account does not stay benched forever when Google's quota endpoint cannot be reached.
+/// Returns whether the account changed.
+fn heal_if_reset(acc: &mut AntigravityAccount, now: i64) -> bool {
+    if acc.status != "rate_limited" {
+        return false;
+    }
+    let known_reset = acc
+        .quota_details
+        .as_ref()
+        .and_then(|details| details.gemini_reset_at.max(details.claude_reset_at));
+    // ponytail: without a reset time newer than the last use, assume the rolling 5-hour window;
+    // a weekly-limit lockout heals too early and is re-flagged by the next 429 or quota read.
+    let reset_at = match known_reset {
+        Some(reset) if reset > acc.last_used => reset,
+        _ => acc.last_used + 5 * 3600,
+    };
+    if now < reset_at {
+        return false;
+    }
+    // Only the flag is cleared. The stored percentage stays as last measured until the next
+    // real quota read, so a healed account is not advertised as full.
+    acc.status = "healthy".into();
+    true
+}
 
-    for path in &candidates {
+fn vscdb_item(key: &str) -> Option<String> {
+    let appdata = std::env::var_os("APPDATA")?;
+    ["Antigravity", "Antigravity IDE"].iter().find_map(|flavour| {
+        let path = std::path::PathBuf::from(&appdata).join(flavour).join("User/globalStorage/state.vscdb");
         if !path.exists() {
-            continue;
+            return None;
         }
         let uri = format!("file:{}?mode=ro", path.to_string_lossy().replace('\\', "/"));
-        if let Ok(conn) = rusqlite::Connection::open_with_flags(
+        rusqlite::Connection::open_with_flags(
             &uri,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        ) {
-            let res: rusqlite::Result<String> = conn.query_row(
-                "SELECT value FROM ItemTable WHERE key = 'antigravityAuthStatus' LIMIT 1",
-                [],
-                |row| row.get(0),
-            );
-            if let Ok(json_str) = res {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    let email = val.get("email").and_then(|v| v.as_str()).map(str::to_string);
-                    let name = val.get("name").and_then(|v| v.as_str()).map(str::to_string);
-                    if let Some(e) = email.filter(|e| !e.is_empty()) {
-                        return Some((e, name));
-                    }
-                }
-            }
+        )
+        .ok()?
+        .query_row("SELECT value FROM ItemTable WHERE key = ?1 LIMIT 1", [key], |row| row.get(0))
+        .ok()
+    })
+}
+
+fn varint(bytes: &mut &[u8]) -> Option<u64> {
+    let mut value = 0u64;
+    for shift in (0..64).step_by(7) {
+        let (&byte, rest) = bytes.split_first()?;
+        *bytes = rest;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
         }
     }
     None
+}
+
+/// Splits a protobuf message into `(field number, varint value, length-delimited payload)`.
+/// Only the two wire types Antigravity's saved state uses are understood; parsing stops at
+/// anything else.
+fn proto_fields(mut bytes: &[u8]) -> Vec<(u64, u64, &[u8])> {
+    let mut fields = Vec::new();
+    while !bytes.is_empty() {
+        let Some(tag) = varint(&mut bytes) else { break };
+        match tag & 7 {
+            0 => {
+                let Some(value) = varint(&mut bytes) else { break };
+                fields.push((tag >> 3, value, &bytes[..0]));
+            }
+            2 => {
+                let Some(length) = varint(&mut bytes).map(|length| length as usize) else { break };
+                if length > bytes.len() {
+                    break;
+                }
+                fields.push((tag >> 3, 0, &bytes[..length]));
+                bytes = &bytes[length..];
+            }
+            _ => break,
+        }
+    }
+    fields
+}
+
+/// Extracts the Google One AI credit balance from the base64 `modelCredits` state value: a list of
+/// `{key, {base64 message}}` entries where `availableCreditsSentinelKey` wraps the balance.
+fn ai_credits_from_state(value: &str) -> Option<f64> {
+    let outer = base64_url_decode(value.trim())?;
+    proto_fields(&outer).into_iter().filter(|field| field.0 == 1).find_map(|(_, _, entry)| {
+        let fields = proto_fields(entry);
+        let key = fields.iter().find(|field| field.0 == 1)?.2;
+        if key != b"availableCreditsSentinelKey" {
+            return None;
+        }
+        let wrapper = fields.iter().find(|field| field.0 == 2)?.2;
+        let encoded = proto_fields(wrapper).into_iter().find(|field| field.0 == 1)?.2;
+        let inner = base64_url_decode(std::str::from_utf8(encoded).ok()?)?;
+        proto_fields(&inner).into_iter().find(|field| field.0 == 2).map(|field| field.1 as f64)
+    })
+}
+
+/// Google One AI credit balance as Antigravity last saved it in its own state database.
+/// It belongs to whichever account the IDE was signed in with and is only as fresh as the IDE's
+/// last write, so callers should prefer a balance reported by the language server.
+pub fn read_vscdb_ai_credits() -> Option<f64> {
+    ai_credits_from_state(&vscdb_item("antigravityUnifiedStateSync.modelCredits")?)
+}
+
+/// Reads saved account information from Antigravity's state.vscdb storage
+pub fn read_vscdb_antigravity_account() -> Option<(String, Option<String>)> {
+    let val: serde_json::Value = serde_json::from_str(&vscdb_item("antigravityAuthStatus")?).ok()?;
+    let email = val.get("email")?.as_str().filter(|email| !email.is_empty())?.to_string();
+    let name = val.get("name").and_then(|v| v.as_str()).map(str::to_string);
+    Some((email, name))
 }
 
 /// Authoritative detection of the active Antigravity session across:
@@ -521,42 +620,19 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
     let now = Utc::now().timestamp();
 
     // Priority 1: Live Language Server process (what IDE is actively communicating with)
-    if let Some(live) = crate::providers::google::probe_antigravity_live_session() {
+    if let Some(live) = crate::providers::google::live_session() {
         if let Some(ref email) = live.email {
-            let mut d = AntigravityQuotaDetails::default();
-            for u in &live.usage {
-                let m = u.metric.to_ascii_lowercase();
-                if let Some(val) = u.value {
-                    if m.contains("gemini-5h") || m.contains("gemini_5h") {
-                        d.gemini_5h = Some(val);
-                        d.gemini_reset_at = u.reset_at;
-                    } else if m.contains("gemini-weekly") || m.contains("gemini_weekly") {
-                        d.gemini_weekly = Some(val);
-                    } else if m.contains("3p-5h") || m.contains("claude-5h") || m.contains("3p_5h") {
-                        d.claude_5h = Some(val);
-                        d.claude_reset_at = u.reset_at;
-                    } else if m.contains("3p-weekly") || m.contains("claude-weekly") || m.contains("3p_weekly") {
-                        d.claude_weekly = Some(val);
-                    }
-                }
-            }
-            let rep_pct = match (d.gemini_5h, d.claude_5h) {
-                (Some(g), Some(c)) => (g + c) / 2.0,
-                (Some(g), None) => g,
-                (None, Some(c)) => c,
-                (None, None) => 100.0,
-            };
-
+            let (quota_remaining_percent, details) = quota_details_from_usage(&live.usage);
             return AntigravityLiveSession {
                 is_running: true,
                 email: Some(email.clone()),
                 name: live.name,
-                plan: live.plan.or(Some("Google AI Pro".into())),
+                plan: live.plan,
                 source: format!("LanguageServer (Live Port: {})", live.port),
                 port: Some(live.port),
                 verified_at: now,
-                quota_details: Some(d),
-                quota_remaining_percent: Some(rep_pct),
+                quota_details: Some(details),
+                quota_remaining_percent,
             };
         }
     }
@@ -620,20 +696,23 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
 
 /// Synchronizes the active detected Antigravity session with the database pool.
 /// Sets `is_current = true` on the verified account, `is_current = false` on others,
-/// and auto-imports new accounts so they appear immediately.
-pub fn sync_antigravity_active_session(database: &Database) -> Result<AntigravityLiveSession> {
+/// and auto-imports new accounts so they appear immediately. Detection talks to the
+/// language server and Google, so the database lock is only taken afterwards.
+pub fn sync_antigravity_active_session(database: &Mutex<Database>) -> Result<AntigravityLiveSession> {
     let session = detect_active_antigravity_session();
-
-    if let Some(ref email) = session.email {
-        let email_lower = email.to_lowercase();
-        let target_id = format!("antigravity:{}", email_lower);
-
-        let mut accounts = database.antigravity_accounts()?;
-        let mut found = false;
-
-        for acc in &mut accounts {
+    let Some(ref email) = session.email else {
+        return Ok(session);
+    };
+    let email_lower = email.to_lowercase();
+    let target_id = format!("antigravity:{}", email_lower);
+    let mut found = false;
+    {
+        let db = lock(database)?;
+        for mut acc in db.antigravity_accounts()? {
+            let mut changed = heal_if_reset(&mut acc, session.verified_at);
             if acc.email.to_lowercase() == email_lower {
                 found = true;
+                changed = true;
                 acc.is_current = true;
                 acc.last_used = session.verified_at;
                 if let Some(q) = session.quota_remaining_percent {
@@ -645,57 +724,51 @@ pub fn sync_antigravity_active_session(database: &Database) -> Result<Antigravit
                 if session.quota_details.is_some() {
                     acc.quota_details = session.quota_details.clone();
                 }
-                let _ = database.save_antigravity_account(acc);
             } else if acc.is_current {
+                changed = true;
                 acc.is_current = false;
-                let _ = database.save_antigravity_account(acc);
+            }
+            if changed {
+                let _ = db.save_antigravity_account(&acc);
             }
         }
-
-        if !found {
-            // Auto-capture credentials from system if available
-            let mut captured = false;
-            if let Ok(cap) = capture_current_account(database) {
-                if cap.email.to_lowercase() == email_lower {
-                    captured = true;
-                }
-            }
-            if !captured {
-                let new_acc = AntigravityAccount {
-                    id: target_id.clone(),
-                    email: email.clone(),
-                    display_name: session.name.clone(),
-                    access_token: String::new(),
-                    refresh_token: String::new(),
-                    id_token: None,
-                    project_id: None,
-                    expiry_timestamp: session.verified_at + 3600,
-                    status: "healthy".into(),
-                    is_current: true,
-                    last_used: session.verified_at,
-                    quota_remaining_percent: session.quota_remaining_percent,
-                    quota_details: session.quota_details.clone(),
-                };
-                let _ = database.save_antigravity_account(&new_acc);
-            }
-        }
-
-        let _ = database.set_current_antigravity_account(&target_id);
     }
 
+    if !found {
+        // Auto-capture credentials from system if available
+        let captured = capture_current_account(database).is_ok_and(|cap| cap.email.to_lowercase() == email_lower);
+        if !captured {
+            // No sign-in token for this account yet: it is listed, but cannot be switched to
+            // until it is captured or signed in through the hub.
+            let new_acc = AntigravityAccount {
+                id: target_id.clone(),
+                email: email.clone(),
+                display_name: session.name.clone(),
+                access_token: String::new(),
+                refresh_token: String::new(),
+                id_token: None,
+                project_id: None,
+                expiry_timestamp: 0,
+                status: "healthy".into(),
+                is_current: true,
+                last_used: session.verified_at,
+                quota_remaining_percent: session.quota_remaining_percent,
+                quota_details: session.quota_details.clone(),
+            };
+            let _ = lock(database)?.save_antigravity_account(&new_acc);
+        }
+    }
+
+    let _ = lock(database)?.set_current_antigravity_account(&target_id);
     Ok(session)
 }
 
 /// Scans local credentials and live sessions to discover or update accounts
-pub fn scan_local_accounts(database: &Database) -> Result<Vec<AntigravityAccount>> {
-    // 1. Sync live detected session
+pub fn scan_local_accounts(database: &Mutex<Database>) -> Result<Vec<AntigravityAccount>> {
+    // Capture first so the live sync that follows has the final say on which account is current.
+    let _ = capture_current_account(database);
     let _ = sync_antigravity_active_session(database);
-
-    // 2. Capture from Windows Credential Manager
-    if let Ok(_) = capture_current_account(database) {}
-
-    // 3. Return all updated accounts
-    database.antigravity_accounts()
+    lock(database)?.antigravity_accounts()
 }
 
 /// Parse email and name from ID Token (JWT without signature verification)
@@ -798,133 +871,82 @@ pub fn fetch_google_quota_response(
     None
 }
 
-/// Fetch representative usable quota percentage (0-100) and multi-model breakdown.
-/// Checks reset timestamps (if now >= reset_time, bucket is 100% restored).
-/// Prevents false 0% when one weekly sub-bucket is depleted while 5-hour quota is 100%.
+/// Maps quota rows onto the per-model breakdown the account pool shows and a representative
+/// percentage: the mean of the rolling 5-hour windows, which is what limits immediate use.
+/// The percentage is `None` when no 5-hour window is present rather than a made-up 100%.
+pub fn quota_details_from_usage(usage: &[UsageValue]) -> (Option<f64>, AntigravityQuotaDetails) {
+    let mut details = AntigravityQuotaDetails::default();
+    for row in usage {
+        let Some(value) = row.value else { continue };
+        let metric = row.metric.to_ascii_lowercase();
+        if metric.contains("gemini-5h") || metric.contains("gemini_5h") {
+            details.gemini_5h = Some(value);
+            details.gemini_reset_at = row.reset_at;
+        } else if metric.contains("gemini-weekly") || metric.contains("gemini_weekly") {
+            details.gemini_weekly = Some(value);
+            details.gemini_weekly_reset_at = row.reset_at;
+        } else if metric.contains("3p-5h") || metric.contains("claude-5h") || metric.contains("3p_5h") {
+            details.claude_5h = Some(value);
+            details.claude_reset_at = row.reset_at;
+        } else if metric.contains("3p-weekly") || metric.contains("claude-weekly") || metric.contains("3p_weekly") {
+            details.claude_weekly = Some(value);
+            details.claude_weekly_reset_at = row.reset_at;
+        }
+    }
+    let representative = match (details.gemini_5h, details.claude_5h) {
+        (Some(g), Some(c)) => Some((g + c) / 2.0),
+        (g, c) => g.or(c),
+    };
+    (representative, details)
+}
+
+/// Fetch representative usable quota percentage (0-100) and multi-model breakdown
+/// for an account straight from Google, without a running IDE.
 pub fn fetch_google_quota_summary(
     access_token: &str,
     project_id: Option<&str>,
 ) -> Option<(f64, AntigravityQuotaDetails)> {
-    let summary = fetch_google_quota_response(access_token, project_id)?;
-    let now = Utc::now().timestamp();
-    let groups = summary.groups?;
-    if groups.is_empty() {
-        return None;
-    }
-
-    let mut details = AntigravityQuotaDetails::default();
-    let mut has_buckets = false;
-
-    for group in groups {
-        if let Some(buckets) = group.buckets {
-            for bucket in buckets {
-                has_buckets = true;
-                let id = bucket.bucket_id.unwrap_or_default().to_ascii_lowercase();
-                let reset_at = bucket
-                    .reset_time
-                    .as_deref()
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.timestamp());
-
-                let mut frac = bucket.remaining_fraction.unwrap_or(1.0);
-                if let Some(reset_ts) = reset_at {
-                    if now >= reset_ts {
-                        frac = 1.0; // Reset time has arrived; quota fully renewed!
-                    }
-                }
-                let pct = (frac * 100.0).clamp(0.0, 100.0);
-
-                if id.contains("gemini-5h") || id.contains("gemini_5h") {
-                    details.gemini_5h = Some(pct);
-                    details.gemini_reset_at = reset_at;
-                } else if id.contains("gemini-weekly") || id.contains("gemini_weekly") {
-                    details.gemini_weekly = Some(pct);
-                } else if id.contains("3p-5h") || id.contains("claude-5h") || id.contains("3p_5h") {
-                    details.claude_5h = Some(pct);
-                    details.claude_reset_at = reset_at;
-                } else if id.contains("3p-weekly") || id.contains("claude-weekly") || id.contains("3p_weekly") {
-                    details.claude_weekly = Some(pct);
-                }
-            }
-        }
-    }
-
-    if !has_buckets {
-        return None;
-    }
-
-    // Active rolling 5-hour capacity represents immediate operational ability
-    let representative_pct = match (details.gemini_5h, details.claude_5h) {
-        (Some(g), Some(c)) => (g + c) / 2.0,
-        (Some(g), None) => g,
-        (None, Some(c)) => c,
-        (None, None) => 100.0,
-    };
-
-    Some((representative_pct, details))
+    let (representative, details) = quota_details_from_usage(&fetch_google_usage_buckets(access_token, project_id));
+    Some((representative?, details))
 }
 
 /// Convert CloudCode quota response to UsageValues
 pub fn fetch_google_usage_buckets(access_token: &str, project_id: Option<&str>) -> Vec<UsageValue> {
-    let Some(summary) = fetch_google_quota_response(access_token, project_id) else {
-        return Vec::new();
-    };
-    let now = Utc::now().timestamp();
+    fetch_google_quota_response(access_token, project_id)
+        .map(|summary| usage_from_quota_response(summary, Utc::now().timestamp()))
+        .unwrap_or_default()
+}
+
+fn usage_from_quota_response(summary: CloudCodeQuotaResponse, now: i64) -> Vec<UsageValue> {
     let mut values = Vec::new();
+    for group in summary.groups.unwrap_or_default() {
+        let group_name = group.display_name.unwrap_or_else(|| "Models".into());
+        for bucket in group.buckets.unwrap_or_default() {
+            let bucket_id = bucket.bucket_id.unwrap_or_else(|| "model".into());
+            let display_name = bucket.display_name.unwrap_or_else(|| bucket_id.clone());
+            let reset_at = bucket
+                .reset_time
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.timestamp());
 
-    if let Some(groups) = summary.groups {
-        for group in groups {
-            let group_name = group.display_name.unwrap_or_else(|| "Models".into());
-            if let Some(buckets) = group.buckets {
-                for bucket in buckets {
-                    let bucket_id = bucket.bucket_id.unwrap_or_else(|| "model".into());
-                    let display_name = bucket.display_name.unwrap_or_else(|| bucket_id.clone());
-                    let reset_at = bucket
-                        .reset_time
-                        .as_deref()
-                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                        .map(|dt| dt.timestamp());
-
-                    let mut frac = bucket.remaining_fraction.unwrap_or(1.0);
-                    if let Some(reset_ts) = reset_at {
-                        if now >= reset_ts {
-                            frac = 1.0; // Reset time has passed; quota restored
-                        }
-                    }
-
-                    values.push(UsageValue {
-                        metric: format!("antigravity_{}_remaining", bucket_id),
-                        label: format!("{} · {}", group_name, display_name),
-                        value: Some((frac * 100.0).clamp(0.0, 100.0)),
-                        max_value: Some(100.0),
-                        unit: "% remaining".into(),
-                        source: UsageSource::OfficialApi,
-                        confidence: Confidence::High,
-                        retrieved_at: now,
-                        reset_at,
-                    });
-                }
+            let mut frac = bucket.remaining_fraction.unwrap_or(1.0);
+            if reset_at.is_some_and(|reset_ts| now >= reset_ts) {
+                frac = 1.0; // Reset time has passed; quota restored
             }
-        }
-    }
 
-    if let Some(gemini_pct) = values
-        .iter()
-        .find(|v| v.metric.contains("gemini-5h") || v.metric.contains("gemini_5h"))
-        .or_else(|| values.iter().find(|v| v.metric.contains("gemini")))
-        .and_then(|v| v.value)
-    {
-        values.push(UsageValue {
-            metric: "antigravity_image_generation".into(),
-            label: "Imagen 3 & Multimodal · Image Generation (1:1)".into(),
-            value: Some(gemini_pct),
-            max_value: Some(100.0),
-            unit: "% remaining".into(),
-            source: UsageSource::OfficialApi,
-            confidence: Confidence::High,
-            retrieved_at: now,
-            reset_at: None,
-        });
+            values.push(UsageValue {
+                metric: format!("antigravity_{}_remaining", bucket_id),
+                label: format!("{} · {}", group_name, display_name),
+                value: Some((frac * 100.0).clamp(0.0, 100.0)),
+                max_value: Some(100.0),
+                unit: "% remaining".into(),
+                source: UsageSource::OfficialApi,
+                confidence: Confidence::High,
+                retrieved_at: now,
+                reset_at,
+            });
+        }
     }
     values
 }
@@ -963,7 +985,7 @@ pub fn kill_antigravity_language_servers() -> usize {
 }
 
 /// Capture current account from Windows Credential Manager, UserInfo, and Google CloudCode APIs
-pub fn capture_current_account(database: &Database) -> Result<AntigravityAccount> {
+pub fn capture_current_account(database: &Mutex<Database>) -> Result<AntigravityAccount> {
     let cred = read_system_antigravity_credential()?
         .ok_or_else(|| HubError::Operation("No Antigravity credential found in Windows Credential Manager. Please sign in to Antigravity first.".into()))?;
 
@@ -1021,34 +1043,15 @@ pub fn capture_current_account(database: &Database) -> Result<AntigravityAccount
         None => (None, None),
     };
 
-    // Fallback to local session summary if direct CloudCode returned None
+    // Fallback to the running IDE, but only when it is signed in as this same account;
+    // otherwise its numbers belong to someone else.
     if quota_pct.is_none() {
-        if let Ok(summary) = crate::providers::google::summary() {
-            let mut d = AntigravityQuotaDetails::default();
-            for u in &summary.usage {
-                let m = u.metric.to_ascii_lowercase();
-                if let Some(val) = u.value {
-                    if m.contains("gemini-5h") || m.contains("gemini_5h") {
-                        d.gemini_5h = Some(val);
-                        d.gemini_reset_at = u.reset_at;
-                    } else if m.contains("gemini-weekly") || m.contains("gemini_weekly") {
-                        d.gemini_weekly = Some(val);
-                    } else if m.contains("3p-5h") || m.contains("claude-5h") || m.contains("3p_5h") {
-                        d.claude_5h = Some(val);
-                        d.claude_reset_at = u.reset_at;
-                    } else if m.contains("3p-weekly") || m.contains("claude-weekly") || m.contains("3p_weekly") {
-                        d.claude_weekly = Some(val);
-                    }
-                }
+        if let Some(live) = crate::providers::google::live_session() {
+            if live.email.as_deref().is_some_and(|live_email| live_email.eq_ignore_ascii_case(&email)) {
+                let (pct, d) = quota_details_from_usage(&live.usage);
+                quota_pct = pct;
+                quota_details = Some(d);
             }
-            let rep = match (d.gemini_5h, d.claude_5h) {
-                (Some(g), Some(c)) => (g + c) / 2.0,
-                (Some(g), None) => g,
-                (None, Some(c)) => c,
-                (None, None) => 100.0,
-            };
-            quota_pct = Some(rep);
-            quota_details = Some(d);
         }
     }
 
@@ -1069,16 +1072,43 @@ pub fn capture_current_account(database: &Database) -> Result<AntigravityAccount
         quota_details,
     };
 
-    database.save_antigravity_account(&account)?;
-    database.set_current_antigravity_account(&id)?;
+    let db = lock(database)?;
+    db.save_antigravity_account(&account)?;
+    db.set_current_antigravity_account(&id)?;
+    drop(db);
     Ok(account)
 }
 
-/// Switch Antigravity to a target account
-pub fn switch_to_account(database: &Database, account_id: &str) -> Result<AntigravityAccount> {
-    let mut account = database
+/// Polls the language server until it reports a signed-in account again after a restart.
+fn wait_for_live_email(timeout: Duration) -> Option<String> {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        std::thread::sleep(Duration::from_secs(1));
+        if let Some(email) = crate::providers::google::live_account_email() {
+            return Some(email);
+        }
+    }
+    None
+}
+
+/// Switches Antigravity to a pooled account: writes its token to Windows Credential Manager and
+/// restarts the language server so the IDE picks it up.
+///
+/// Refuses accounts without a saved refresh token (writing an empty credential would sign the
+/// IDE out). When the IDE was running, waits for the language server to come back and checks
+/// which account it reports; if it is still the old one, the previous credential is restored
+/// and an error is returned. Can block for up to ~15 s; the database lock is not held meanwhile.
+pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result<AntigravityAccount> {
+    let mut account = lock(database)?
         .antigravity_account(account_id)?
         .ok_or_else(|| HubError::Operation(format!("Account {} not found", account_id)))?;
+
+    if account.refresh_token.is_empty() {
+        return Err(HubError::Operation(format!(
+            "{} has no saved sign-in token. Use Sign in with Google, or capture it while it is the active Antigravity account.",
+            account.email
+        )));
+    }
 
     let now = Utc::now().timestamp();
 
@@ -1094,11 +1124,11 @@ pub fn switch_to_account(database: &Database, account_id: &str) -> Result<Antigr
                 if let Some(id_tok) = refreshed.id_token {
                     account.id_token = Some(id_tok);
                 }
-                account.status = "active".into();
+                account.status = "healthy".into();
             }
             Err(e) => {
                 account.status = "expired".into();
-                let _ = database.save_antigravity_account(&account);
+                let _ = lock(database)?.save_antigravity_account(&account);
                 return Err(HubError::Operation(format!(
                     "Could not refresh token for {}: {}",
                     account.email, e
@@ -1111,6 +1141,7 @@ pub fn switch_to_account(database: &Database, account_id: &str) -> Result<Antigr
         .unwrap_or_else(Utc::now)
         .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
 
+    let previous = read_system_antigravity_credential().ok().flatten();
     let payload = KeyringPayload {
         token: KeyringTokenDetails {
             access_token: account.access_token.clone(),
@@ -1120,7 +1151,9 @@ pub fn switch_to_account(database: &Database, account_id: &str) -> Result<Antigr
             id_token: account.id_token.clone(),
             project_id: account.project_id.clone(),
         },
-        auth_method: "consumer".into(),
+        auth_method: previous
+            .as_ref()
+            .map_or_else(|| "consumer".into(), |credential| credential.auth_method.clone()),
     };
 
     // 1. Write to Windows Credential Store
@@ -1129,28 +1162,45 @@ pub fn switch_to_account(database: &Database, account_id: &str) -> Result<Antigr
     // 2. Hot switch: kill running language server so Antigravity picks up new account
     let killed = kill_antigravity_language_servers();
 
-    // 3. Update database state and refresh quota
+    // 3. Verify the IDE really came back as the new account
+    let mut outcome = "Antigravity was not running; the account applies on its next start.".to_string();
+    if killed > 0 {
+        match wait_for_live_email(Duration::from_secs(15)) {
+            Some(live_email) if !live_email.eq_ignore_ascii_case(&account.email) => {
+                if let Some(previous) = &previous {
+                    let _ = write_system_antigravity_credential(previous);
+                }
+                return Err(HubError::Operation(format!(
+                    "Antigravity is still signed in as {live_email}, so the switch to {} did not take effect and the previous credential was restored. Sign out inside Antigravity, then switch again.",
+                    account.email
+                )));
+            }
+            Some(_) => outcome = format!("Language server restarted ({killed} process(es)) and reports the new account."),
+            None => outcome = "The language server did not come back within 15 seconds; restart Antigravity to finish the switch.".into(),
+        }
+    }
+
+    // 4. Update database state and refresh quota
     account.is_current = true;
     account.last_used = now;
     if let Some((q, details)) = fetch_google_quota_summary(&account.access_token, account.project_id.as_deref()) {
         account.quota_remaining_percent = Some(q);
         account.quota_details = Some(details);
     }
-    database.save_antigravity_account(&account)?;
-    database.set_current_antigravity_account(&account.id)?;
+    let db = lock(database)?;
+    db.save_antigravity_account(&account)?;
+    db.set_current_antigravity_account(&account.id)?;
 
-    // 4. Record activity event
-    database.record_activity_event(
+    // 5. Record activity event
+    db.record_activity_event(
         "antigravity_switch",
         Some(&account.id),
         &format!("Switched Antigravity to {}", account.email),
-        Some(&format!(
-            "Account switch completed (hot-reloaded {} language server process(es)).",
-            killed
-        )),
+        Some(&outcome),
         Severity::Success,
         now,
     )?;
+    drop(db);
 
     Ok(account)
 }
@@ -1191,30 +1241,24 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
 
     let current = accounts.iter().find(|a| a.is_current);
 
-    // Get live quota from running Antigravity if available.
-    // Check primary Gemini model quota (Antigravity's core engine)
-    let live_min_quota = match crate::providers::google::summary() {
-        Ok(summary) => {
-            // Priority 1: Check active rolling 5-hour capacity (core operational limit)
-            let rolling_5h = summary
+    // Lowest rolling 5-hour window of the current account, from the provider refresh the monitor
+    // already ran. A reading that belongs to another account (e.g. the one just switched away
+    // from) is ignored until the next refresh, so one depleted reading cannot trigger twice.
+    let current_key = current.map(|c| format!("email:{}", c.email.to_lowercase()));
+    let live_min_quota = state
+        .providers
+        .read()
+        .map_err(|_| HubError::Operation("provider lock is unavailable".into()))?
+        .iter()
+        .find(|provider| provider.id == "google" && provider.error.is_none() && provider.account_key.is_some() && provider.account_key == current_key)
+        .and_then(|provider| {
+            provider
                 .usage
                 .iter()
-                .filter(|u| u.unit == "% remaining" && (u.metric.contains("5h") || u.label.contains("Five Hour")) && !u.metric.contains("image"))
+                .filter(|u| u.unit == "% remaining" && u.metric.contains("5h"))
                 .filter_map(|u| u.value)
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-            rolling_5h.or_else(|| {
-                // Priority 2: Check any gemini metric
-                summary
-                    .usage
-                    .iter()
-                    .filter(|u| u.unit == "% remaining" && u.metric.contains("gemini") && !u.metric.contains("image"))
-                    .filter_map(|u| u.value)
-                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            })
-        }
-        Err(_) => None,
-    };
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        });
 
     let threshold = settings.antigravity_switch_threshold as f64;
     let is_depleted = live_min_quota.is_some_and(|q| q <= threshold);
@@ -1233,10 +1277,16 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
         "Antigravity account depleted or rate-limited; evaluating candidates for auto-switch"
     );
 
-    // Filter candidates (not current, not expired, not rate_limited, not forbidden)
+    // Candidates: another account that can actually be switched to and is not itself at or
+    // below the threshold (otherwise two low accounts would bounce the IDE back and forth).
     let mut candidates: Vec<&AntigravityAccount> = accounts
         .iter()
-        .filter(|a| !a.is_current && a.status != "expired" && a.status != "rate_limited" && a.status != "forbidden")
+        .filter(|a| {
+            !a.is_current
+                && !a.refresh_token.is_empty()
+                && !matches!(a.status.as_str(), "expired" | "rate_limited" | "forbidden")
+                && a.quota_remaining_percent.is_none_or(|q| q > threshold)
+        })
         .collect();
 
     if candidates.is_empty() {
@@ -1256,12 +1306,8 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
     }
 
     let chosen = candidates[0].clone();
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock unavailable".into()))?;
-
-    let switched = switch_to_account(&db, &chosen.id)?;
+    let switched = switch_to_account(&state.database, &chosen.id)?;
+    let db = lock(&state.database)?;
 
     let now = Utc::now().timestamp();
     db.record_activity_event(
@@ -1305,40 +1351,85 @@ mod tests {
     }
 
     #[test]
-    fn parse_quota_response_extracts_lowest_remaining_percentage() {
-        let sample = serde_json::json!({
+    fn quota_response_maps_to_rows_and_pool_breakdown() {
+        let summary: CloudCodeQuotaResponse = serde_json::from_value(serde_json::json!({
             "groups": [
-                {
-                    "displayName": "Gemini Models",
-                    "buckets": [
-                        { "bucketId": "gemini-weekly", "remainingFraction": 0.5 },
-                        { "bucketId": "gemini-5h", "remainingFraction": 0.25 }
-                    ]
-                },
-                {
-                    "displayName": "Claude and GPT models",
-                    "buckets": [
-                        { "bucketId": "3p-weekly", "remainingFraction": 0.05 },
-                        { "bucketId": "3p-5h", "remainingFraction": 0.8 }
-                    ]
-                }
+                { "displayName": "Gemini Models", "buckets": [
+                    { "bucketId": "gemini-weekly", "remainingFraction": 0.5, "resetTime": "2030-01-05T00:00:00Z" },
+                    { "bucketId": "gemini-5h", "remainingFraction": 0.25, "resetTime": "2030-01-01T00:00:00Z" },
+                ] },
+                { "displayName": "Claude and GPT models", "buckets": [
+                    { "bucketId": "3p-weekly", "remainingFraction": 0.05 },
+                    { "bucketId": "3p-5h", "remainingFraction": 0.0, "resetTime": "2020-01-01T00:00:00Z" },
+                ] },
             ]
-        });
-        let summary: CloudCodeQuotaResponse = serde_json::from_value(sample).unwrap();
-        let mut min_pct: Option<f64> = None;
-        if let Some(groups) = summary.groups {
-            for group in groups {
-                if let Some(buckets) = group.buckets {
-                    for bucket in buckets {
-                        if let Some(frac) = bucket.remaining_fraction {
-                            let pct = frac * 100.0;
-                            min_pct = Some(min_pct.map_or(pct, |m| m.min(pct)));
-                        }
-                    }
-                }
-            }
+        }))
+        .unwrap();
+        let rows = usage_from_quota_response(summary, 1_800_000_000);
+        // Only what Google reported: no invented image-generation row.
+        assert_eq!(rows.len(), 4);
+        let (representative, details) = quota_details_from_usage(&rows);
+        assert_eq!(details.gemini_5h, Some(25.0));
+        assert_eq!(details.gemini_weekly, Some(50.0));
+        assert_eq!(details.gemini_weekly_reset_at, Some(1_893_801_600));
+        assert_eq!(details.claude_weekly_reset_at, None);
+        assert_eq!(details.claude_weekly, Some(5.0));
+        // The Claude 5-hour window reset in the past, so it counts as renewed.
+        assert_eq!(details.claude_5h, Some(100.0));
+        assert_eq!(representative, Some(62.5));
+        assert_eq!(quota_details_from_usage(&[]).0, None);
+    }
+
+    #[test]
+    fn ai_credit_balance_is_read_from_antigravity_state() {
+        // Same layout as a real `modelCredits` value: threshold 50, credits enabled, balance 1000.
+        let state = "CigKHm1pbmltdW1DcmVkaXRBbW91bnRGb3JVc2FnZUtleRIGCgRFREk9CiEKF3VzZUFJQ3JlZGl0c1NlbnRpbmVsS2V5EgYKBENBRT0KJQobYXZhaWxhYmxlQ3JlZGl0c1NlbnRpbmVsS2V5EgYKBEVPZ0g=";
+        assert_eq!(ai_credits_from_state(state), Some(1000.0));
+        assert_eq!(ai_credits_from_state("not base64 !"), None);
+        assert_eq!(ai_credits_from_state(""), None);
+    }
+
+    fn pooled(status: &str, last_used: i64, reset_at: Option<i64>) -> AntigravityAccount {
+        AntigravityAccount {
+            id: "antigravity:a@example.com".into(),
+            email: "a@example.com".into(),
+            display_name: None,
+            access_token: String::new(),
+            refresh_token: String::new(),
+            id_token: None,
+            project_id: None,
+            expiry_timestamp: 0,
+            status: status.into(),
+            is_current: false,
+            last_used,
+            quota_remaining_percent: Some(0.0),
+            quota_details: reset_at.map(|reset| AntigravityQuotaDetails { gemini_reset_at: Some(reset), ..Default::default() }),
         }
-        assert_eq!(min_pct, Some(5.0));
+    }
+
+    #[test]
+    fn rate_limit_heals_only_after_the_window_resets() {
+        let mut waiting = pooled("rate_limited", 1_000, Some(5_000));
+        assert!(!heal_if_reset(&mut waiting, 4_999));
+        assert!(heal_if_reset(&mut waiting, 5_000));
+        assert_eq!(waiting.status, "healthy");
+
+        // A reset time older than the rate limit itself says nothing: fall back to five hours.
+        let mut stale = pooled("rate_limited", 10_000, Some(5_000));
+        assert!(!heal_if_reset(&mut stale, 10_000 + 5 * 3600 - 1));
+        assert!(heal_if_reset(&mut stale, 10_000 + 5 * 3600));
+
+        let mut forbidden = pooled("forbidden", 0, None);
+        assert!(!heal_if_reset(&mut forbidden, i64::MAX));
+    }
+
+    #[test]
+    fn switching_refuses_accounts_without_a_sign_in_token() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(&directory.path().join("hub.sqlite3")).unwrap();
+        database.save_antigravity_account(&pooled("healthy", 0, None)).unwrap();
+        let error = switch_to_account(&Mutex::new(database), "antigravity:a@example.com").unwrap_err();
+        assert!(error.to_string().contains("no saved sign-in token"), "{error}");
     }
 
     #[test]

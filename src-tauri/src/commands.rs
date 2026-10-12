@@ -131,11 +131,17 @@ pub fn update_settings(
     state
         .paused
         .store(!settings.process_monitoring, Ordering::Relaxed);
-    state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
-        .save_settings(&settings)?;
+    settings.proxy_model_map.retain(|rule| !rule.from.trim().is_empty() && !rule.to.trim().is_empty());
+    {
+        let db = state
+            .database
+            .lock()
+            .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
+        // The key is only ever changed through regenerate_proxy_api_key.
+        settings.proxy_api_key = db.settings()?.proxy_api_key;
+        db.save_settings(&settings)?;
+    }
+    crate::proxy::set_model_map(settings.proxy_model_map.clone());
     if let Err(error) = update_tray_language(&app, &settings.language) {
         tracing::warn!(%error, "could not update tray language");
     }
@@ -206,92 +212,19 @@ fn spawn_hidden(executable: &Path, arguments: &[String]) -> Result<()> {
 
 #[tauri::command(async)]
 pub fn get_antigravity_accounts(state: State<'_, HubState>) -> Result<Vec<AntigravityAccount>> {
-    let db = state
+    // Local and quick: the live session sync. Google quota for the other accounts is pulled by
+    // refresh_all_antigravity_accounts, so opening the page never waits on the network.
+    let _ = crate::antigravity::sync_antigravity_active_session(&state.database);
+    state
         .database
         .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    let _ = crate::antigravity::sync_antigravity_active_session(&db);
-    let mut accounts = db.antigravity_accounts()?;
-    let now = chrono::Utc::now().timestamp();
-    for acc in &mut accounts {
-        if !acc.refresh_token.is_empty() {
-            let mut changed = false;
-            if acc.expiry_timestamp <= now + 60 {
-                if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&acc.refresh_token) {
-                    acc.access_token = token_resp.access_token;
-                    acc.expiry_timestamp = now + token_resp.expires_in;
-                    if let Some(id_tok) = token_resp.id_token {
-                        acc.id_token = Some(id_tok);
-                    }
-                    changed = true;
-                }
-            }
-            let quota_opt = crate::antigravity::fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref());
-            if let Some((q, details)) = quota_opt {
-                if acc.quota_remaining_percent != Some(q) {
-                    acc.quota_remaining_percent = Some(q);
-                    changed = true;
-                }
-                if acc.quota_details.as_ref() != Some(&details) {
-                    acc.quota_details = Some(details);
-                    changed = true;
-                }
-                let new_status = if q <= 0.0 { "rate_limited" } else { "healthy" };
-                if acc.status != new_status && acc.status != "expired" && acc.status != "forbidden" {
-                    acc.status = new_status.into();
-                    changed = true;
-                }
-            } else if acc.is_current {
-                // If direct CloudCode wasn't reachable, check local session for active account
-                if let Ok(summary) = crate::providers::google::summary() {
-                    let mut d = crate::models::AntigravityQuotaDetails::default();
-                    for u in &summary.usage {
-                        let m = u.metric.to_ascii_lowercase();
-                        if let Some(val) = u.value {
-                            if m.contains("gemini-5h") || m.contains("gemini_5h") {
-                                d.gemini_5h = Some(val);
-                                d.gemini_reset_at = u.reset_at;
-                            } else if m.contains("gemini-weekly") || m.contains("gemini_weekly") {
-                                d.gemini_weekly = Some(val);
-                            } else if m.contains("3p-5h") || m.contains("claude-5h") || m.contains("3p_5h") {
-                                d.claude_5h = Some(val);
-                                d.claude_reset_at = u.reset_at;
-                            } else if m.contains("3p-weekly") || m.contains("claude-weekly") || m.contains("3p_weekly") {
-                                d.claude_weekly = Some(val);
-                            }
-                        }
-                    }
-                    let rep = match (d.gemini_5h, d.claude_5h) {
-                        (Some(g), Some(c)) => (g + c) / 2.0,
-                        (Some(g), None) => g,
-                        (None, Some(c)) => c,
-                        (None, None) => 100.0,
-                    };
-                    if acc.quota_remaining_percent != Some(rep) {
-                        acc.quota_remaining_percent = Some(rep);
-                        changed = true;
-                    }
-                    if acc.quota_details.as_ref() != Some(&d) {
-                        acc.quota_details = Some(d);
-                        changed = true;
-                    }
-                }
-            }
-            if changed {
-                let _ = db.save_antigravity_account(acc);
-            }
-        }
-    }
-    Ok(accounts)
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+        .antigravity_accounts()
 }
 
 #[tauri::command(async)]
 pub fn capture_current_antigravity_account(state: State<'_, HubState>) -> Result<AntigravityAccount> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::capture_current_account(&db)
+    crate::antigravity::capture_current_account(&state.database)
 }
 
 #[tauri::command(async)]
@@ -351,11 +284,7 @@ pub fn switch_antigravity_account(
     state: State<'_, HubState>,
     account_id: String,
 ) -> Result<AntigravityAccount> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::switch_to_account(&db, &account_id)
+    crate::antigravity::switch_to_account(&state.database, &account_id)
 }
 
 #[tauri::command]
@@ -474,51 +403,31 @@ pub fn import_antigravity_accounts(
     state: State<'_, HubState>,
     json_data: String,
 ) -> Result<usize> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::import_antigravity_accounts_json(&db, &json_data)
+    crate::antigravity::import_antigravity_accounts_json(&state.database, &json_data)
 }
 
 #[tauri::command(async)]
 pub fn refresh_all_antigravity_accounts(
     state: State<'_, HubState>,
 ) -> Result<Vec<AntigravityAccount>> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::refresh_all_accounts(&db)
+    crate::antigravity::refresh_all_accounts(&state.database)
 }
 
 #[tauri::command(async)]
 pub fn scan_local_antigravity_accounts(
     state: State<'_, HubState>,
 ) -> Result<Vec<AntigravityAccount>> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::scan_local_accounts(&db)
+    crate::antigravity::scan_local_accounts(&state.database)
 }
 
 #[tauri::command(async)]
 pub fn get_antigravity_live_session(state: State<'_, HubState>) -> Result<AntigravityLiveSession> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::sync_antigravity_active_session(&db)
+    crate::antigravity::sync_antigravity_active_session(&state.database)
 }
 
 #[tauri::command(async)]
 pub fn sync_antigravity_session(state: State<'_, HubState>) -> Result<AntigravityLiveSession> {
-    let db = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
-    crate::antigravity::sync_antigravity_active_session(&db)
+    crate::antigravity::sync_antigravity_active_session(&state.database)
 }
 
 #[tauri::command]
@@ -543,6 +452,23 @@ pub fn test_proxy_prompt(
     let (text, latency_ms) = crate::proxy::test_prompt(&state, &prompt, &model_to_use)
         .map_err(HubError::Operation)?;
     Ok(TestPromptResult { text, latency_ms })
+}
+
+#[tauri::command]
+pub fn regenerate_proxy_api_key(state: State<'_, HubState>) -> Result<AppSettings> {
+    let db = state
+        .database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
+    let mut settings = db.settings()?;
+    settings.proxy_api_key = crate::proxy::generate_api_key();
+    db.save_settings(&settings)?;
+    Ok(settings)
+}
+
+#[tauri::command(async)]
+pub fn get_proxy_models(state: State<'_, HubState>) -> Vec<crate::proxy::ProxyModel> {
+    crate::proxy::available_models(&state)
 }
 
 #[tauri::command]

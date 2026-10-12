@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::antigravity;
-use crate::models::AntigravityAccount;
+use crate::models::{AntigravityAccount, ModelMapRule};
 use crate::HubState;
 
 static PROXY_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -31,6 +31,139 @@ static PROXY_HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
         .build()
         .unwrap_or_else(|_| Client::new())
 });
+
+/// One upstream model the pool account can call, as Google's own catalog reports it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyModel {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub remaining_percent: Option<f64>,
+    pub reset_at: Option<i64>,
+}
+
+static MODEL_MAP: LazyLock<Mutex<Vec<ModelMapRule>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Replaces the user's model mapping rules; called at startup and whenever settings are saved.
+pub fn set_model_map(rules: Vec<ModelMapRule>) {
+    if let Ok(mut guard) = MODEL_MAP.lock() {
+        *guard = rules;
+    }
+}
+
+fn mapped_model(input_model: &str, rules: &[ModelMapRule]) -> Option<String> {
+    let input = input_model.to_ascii_lowercase();
+    rules.iter().find_map(|rule| {
+        let from = rule.from.trim().to_ascii_lowercase();
+        let matches = match from.strip_suffix('*') {
+            Some(prefix) => input.starts_with(prefix),
+            None => input == from,
+        };
+        (matches && !from.is_empty() && !rule.to.trim().is_empty()).then(|| rule.to.trim().to_owned())
+    })
+}
+
+/// A fresh proxy API key. Entropy comes from the OS-seeded hasher keys the standard library
+/// draws for every `RandomState`, which avoids adding a randomness dependency.
+pub fn generate_api_key() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut key = String::from("sk-hub-");
+    for _ in 0..3 {
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u128(chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default() as u128);
+        key.push_str(&format!("{:016x}", hasher.finish()));
+    }
+    key
+}
+
+const MODEL_CATALOG_TTL: Duration = Duration::from_secs(600);
+static MODEL_CATALOG: LazyLock<Mutex<Option<(Instant, Vec<ProxyModel>)>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Reads a `fetchAvailableModels` response: a `models` map keyed by model id, each entry
+/// optionally carrying a display name and a `quotaInfo` block.
+fn parse_model_catalog(body: &Value) -> Vec<ProxyModel> {
+    let Some(models) = body.get("models").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    models
+        .iter()
+        .map(|(id, info)| {
+            let quota = info.get("quotaInfo");
+            ProxyModel {
+                id: id.clone(),
+                display_name: info.get("displayName").and_then(Value::as_str).map(str::to_owned),
+                remaining_percent: quota
+                    .and_then(|quota| quota.get("remainingFraction"))
+                    .and_then(Value::as_f64)
+                    .map(|fraction| (fraction * 100.0).clamp(0.0, 100.0)),
+                reset_at: quota
+                    .and_then(|quota| quota.get("resetTime"))
+                    .and_then(Value::as_str)
+                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                    .map(|time| time.timestamp()),
+            }
+        })
+        .collect()
+}
+
+fn cached_models() -> Option<Vec<ProxyModel>> {
+    let guard = MODEL_CATALOG.lock().ok()?;
+    let (fetched_at, models) = guard.as_ref()?;
+    (fetched_at.elapsed() < MODEL_CATALOG_TTL).then(|| models.clone())
+}
+
+/// Last catalog seen, however old: good enough for mapping names, where a stale id list beats
+/// the built-in fallbacks.
+fn catalog_snapshot() -> Vec<ProxyModel> {
+    MODEL_CATALOG
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|(_, models)| models.clone()))
+        .unwrap_or_default()
+}
+
+/// Live list of models the active pool account may call, straight from Google, cached for ten
+/// minutes. Empty when no pool account has a working sign-in or Google does not answer; callers
+/// then fall back to the built-in alias names.
+pub fn available_models(state: &HubState) -> Vec<ProxyModel> {
+    if let Some(models) = cached_models() {
+        return models;
+    }
+    let Ok(account) = get_active_account(state) else {
+        return Vec::new();
+    };
+    let project = account.project_id.as_deref().unwrap_or("aicode-consumers");
+    for url in [
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+        "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+    ] {
+        let response = PROXY_HTTP_CLIENT
+            .post(url)
+            .bearer_auth(&account.access_token)
+            .header(reqwest::header::USER_AGENT, "antigravity")
+            .timeout(Duration::from_secs(12))
+            .json(&json!({ "project": project }))
+            .send();
+        let models = match response {
+            Ok(response) if response.status().is_success() => response.json::<Value>().map(|body| parse_model_catalog(&body)).unwrap_or_default(),
+            Ok(response) => {
+                tracing::warn!(status = response.status().as_u16(), "model catalog request was rejected");
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "model catalog request failed");
+                continue;
+            }
+        };
+        if !models.is_empty() {
+            if let Ok(mut guard) = MODEL_CATALOG.lock() {
+                *guard = Some((Instant::now(), models.clone()));
+            }
+            return models;
+        }
+    }
+    Vec::new()
+}
 
 /// Default port for the local AI proxy gateway
 pub const DEFAULT_PROXY_PORT: u16 = 8046;
@@ -108,6 +241,12 @@ pub fn start_proxy_server(app_handle: AppHandle, port: u16) {
             }
         };
 
+        // Load the model catalog once up front so name mapping uses real ids from the first request.
+        let warm_handle = app_handle.clone();
+        thread::spawn(move || {
+            let _ = available_models(&warm_handle.state::<HubState>());
+        });
+
         for stream in listener.incoming() {
             match stream {
                 Ok(mut stream) => {
@@ -130,7 +269,7 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
     let _ = stream.set_read_timeout(Some(Duration::from_secs(60)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(60)));
 
-    let (method, path, body_str) = {
+    let (method, path, body_str, presented_key) = {
         let mut reader = BufReader::new(&mut *stream);
         let mut request_line = String::new();
         if reader.read_line(&mut request_line)? == 0 {
@@ -147,14 +286,21 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
 
         // Read headers
         let mut content_length = 0usize;
+        let mut presented_key: Option<String> = None;
         loop {
             let mut line = String::new();
             if reader.read_line(&mut line)? == 0 || line.trim().is_empty() {
                 break;
             }
-            if line.to_ascii_lowercase().starts_with("content-length:") {
+            let lower = line.to_ascii_lowercase();
+            if lower.starts_with("content-length:") {
                 if let Some(val) = line.split(':').nth(1) {
                     content_length = val.trim().parse().unwrap_or(0);
+                }
+            } else if lower.starts_with("authorization:") || lower.starts_with("x-api-key:") || lower.starts_with("x-goog-api-key:") {
+                if let Some((_, value)) = line.split_once(':') {
+                    let value = value.trim();
+                    presented_key = Some(value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")).unwrap_or(value).trim().to_owned());
                 }
             }
         }
@@ -166,7 +312,11 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
         }
 
         let body_str = String::from_utf8_lossy(&body).to_string();
-        (method, path, body_str)
+        // Google's SDKs send the key as a query parameter instead of a header.
+        let presented_key = presented_key.or_else(|| {
+            path.split_once('?')?.1.split('&').find_map(|pair| pair.strip_prefix("key=").map(str::to_owned))
+        });
+        (method, path, body_str, presented_key)
     };
 
     // Handle CORS preflight
@@ -188,43 +338,56 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
 
     let clean_path = path.split('?').next().unwrap_or(&path);
 
+    // Everything except the health check needs the proxy key (unless the user turned it off):
+    // without it any program on this PC could spend the pooled accounts' quota.
+    if !matches!(clean_path, "/" | "/health") {
+        let settings = state.database.lock().ok().and_then(|db| db.settings().ok()).unwrap_or_default();
+        if settings.proxy_require_key && !settings.proxy_api_key.is_empty() && presented_key.as_deref() != Some(settings.proxy_api_key.as_str()) {
+            let err = json!({"error": {"code": 401, "type": "authentication_error", "message": "Missing or wrong API key. Copy the key from AI Usage Hub > API Proxy."}});
+            return send_json_response(stream, 401, &err);
+        }
+    }
+
     match (method.as_str(), clean_path) {
         ("GET", "/") | ("GET", "/health") => {
             let res = json!({
                 "status": "online",
                 "service": "AI Usage Hub AI Proxy Gateway",
-                "version": "0.1.17",
+                "version": env!("CARGO_PKG_VERSION"),
                 "endpoints": [
                     "/v1/chat/completions",
                     "/v1/messages",
                     "/v1/models",
+                    "/v1/images/generations",
                     "/v1beta/models"
                 ]
             });
             send_json_response(stream, 200, &res)?;
         }
         ("GET", "/v1/models") | ("GET", "/models") | ("GET", "/v1beta/models") => {
-            let res = json!({
-                "object": "list",
-                "data": [
-                    {"id": "claude-3-7-sonnet", "object": "model", "owned_by": "anthropic"},
-                    {"id": "claude-3-5-sonnet", "object": "model", "owned_by": "anthropic"},
-                    {"id": "claude-3-5-haiku", "object": "model", "owned_by": "anthropic"},
-                    {"id": "claude-sonnet-4-6", "object": "model", "owned_by": "anthropic"},
-                    {"id": "claude-opus-4", "object": "model", "owned_by": "anthropic"},
-                    {"id": "gemini-2.5-pro", "object": "model", "owned_by": "google"},
-                    {"id": "gemini-2.5-flash", "object": "model", "owned_by": "google"},
-                    {"id": "gemini-2.0-flash", "object": "model", "owned_by": "google"},
-                    {"id": "gemini-3.6-flash-high", "object": "model", "owned_by": "google"},
-                    {"id": "gemini-pro-agent", "object": "model", "owned_by": "google"},
-                    {"id": "gpt-4o", "object": "model", "owned_by": "openai"},
-                    {"id": "gpt-4o-mini", "object": "model", "owned_by": "openai"},
-                    {"id": "gpt-oss-120b-medium", "object": "model", "owned_by": "openai"},
-                    {"id": "o1", "object": "model", "owned_by": "openai"},
-                    {"id": "o3-mini", "object": "model", "owned_by": "openai"},
-                    {"id": "imagen-3", "object": "model", "owned_by": "google"}
-                ]
-            });
+            // Real upstream ids first, then the alias names existing client configs use.
+            let mut data: Vec<Value> = available_models(state)
+                .iter()
+                .map(|model| json!({"id": model.id, "object": "model", "owned_by": "antigravity", "display_name": model.display_name, "remaining_percent": model.remaining_percent, "reset_at": model.reset_at}))
+                .collect();
+            for (id, owner) in [
+                ("claude-3-7-sonnet", "anthropic"),
+                ("claude-3-5-sonnet", "anthropic"),
+                ("claude-3-5-haiku", "anthropic"),
+                ("claude-opus-4", "anthropic"),
+                ("gemini-2.5-pro", "google"),
+                ("gemini-2.5-flash", "google"),
+                ("gemini-2.0-flash", "google"),
+                ("gpt-4o", "openai"),
+                ("gpt-4o-mini", "openai"),
+                ("o1", "openai"),
+                ("o3-mini", "openai"),
+            ] {
+                if !data.iter().any(|model| model["id"] == id) {
+                    data.push(json!({"id": id, "object": "model", "owned_by": owner}));
+                }
+            }
+            let res = json!({ "object": "list", "data": data });
             send_json_response(stream, 200, &res)?;
         }
         ("POST", "/v1/chat/completions") | ("POST", "/chat/completions") => {
@@ -232,6 +395,9 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
         }
         ("POST", "/v1/messages") | ("POST", "/messages") => {
             handle_anthropic_messages(stream, state, &body_str)?;
+        }
+        ("POST", "/v1/images/generations") | ("POST", "/images/generations") => {
+            handle_image_generation(stream, state, &body_str)?;
         }
         // Google Gemini Native API Format (lbjlaq feature)
         ("POST", p) if p.contains("/models/") && (p.contains(":generateContent") || p.contains(":streamGenerateContent")) => {
@@ -320,22 +486,41 @@ struct AnthropicMessagesRequest {
 }
 
 /// Map model names to appropriate CloudCode internal upstream model
-pub fn resolve_upstream_model(input_model: &str) -> &'static str {
+pub fn resolve_upstream_model(input_model: &str) -> String {
+    let rules = MODEL_MAP.lock().map(|guard| guard.clone()).unwrap_or_default();
+    mapped_model(input_model, &rules).unwrap_or_else(|| resolve_with_catalog(input_model, &catalog_snapshot()))
+}
+
+/// Maps a client-side model name to an upstream id. A name that already is an upstream id passes
+/// through. Claude and GPT aliases follow whatever generation the catalog currently offers, so the
+/// proxy does not break each time Google renames a model; the fallbacks cover an empty catalog.
+fn resolve_with_catalog(input_model: &str, catalog: &[ProxyModel]) -> String {
+    if catalog.iter().any(|model| model.id == input_model) {
+        return input_model.to_owned();
+    }
     let lower = input_model.to_ascii_lowercase();
     // Silent background downgrading: Preserves Sonnet/Pro quota on Claude CLI background/title tasks
-    if lower.contains("haiku") {
-        "gemini-3.6-flash-high"
+    let (family, fallback) = if lower.contains("haiku") {
+        (None, "gemini-3.6-flash-high")
     } else if lower.contains("opus") || lower.contains("thinking") || lower.contains("o1") || lower.contains("o3") || lower.contains("r1") {
-        "claude-opus-4-6-thinking"
+        (Some("claude-opus"), "claude-opus-5-5-medium")
     } else if lower.contains("claude") || lower.contains("sonnet") {
-        "claude-sonnet-4-6"
+        (Some("claude-sonnet"), "claude-sonnet-5-5-medium")
     } else if lower.contains("gpt") || lower.contains("oss") {
-        "gpt-oss-120b-medium"
+        (Some("gpt-oss"), "gpt-oss-120b-medium")
     } else if lower.contains("pro") || lower.contains("agent") {
-        "gemini-pro-agent"
+        (None, "gemini-pro-agent")
     } else {
-        "gemini-3.6-flash-high"
-    }
+        (None, "gemini-3.6-flash-high")
+    };
+    family
+        .and_then(|family| {
+            // Prefer the medium tier; otherwise the last id alphabetically (newest version).
+            let mut ids: Vec<&str> = catalog.iter().map(|model| model.id.as_str()).filter(|id| id.contains(family)).collect();
+            ids.sort_unstable();
+            ids.iter().find(|id| id.ends_with("-medium")).or(ids.last()).map(|id| id.to_string())
+        })
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 /// Dispatches an upstream generation request with automatic token refresh, failover, and model fallback
@@ -679,7 +864,7 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
     };
 
     let requested_model = req.model.as_deref().unwrap_or("gemini-2.5-flash");
-    let upstream_model = resolve_upstream_model(requested_model);
+    let upstream_model = &resolve_upstream_model(requested_model);
 
     // Convert OpenAI messages to Gemini contents
     let mut contents = Vec::new();
@@ -873,7 +1058,7 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     };
 
     let requested_model = req.model.as_deref().unwrap_or("claude-3-7-sonnet");
-    let upstream_model = resolve_upstream_model(requested_model);
+    let upstream_model = &resolve_upstream_model(requested_model);
 
     let mut contents = Vec::new();
     let mut system_instruction = None;
@@ -1059,6 +1244,77 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     Ok(())
 }
 
+/// Base64 images found in an upstream response, in order.
+fn inline_images(upstream: &Value) -> Vec<String> {
+    upstream
+        .pointer("/response/candidates")
+        .or_else(|| upstream.pointer("/candidates"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| candidate.pointer("/content/parts").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|part| part.pointer("/inlineData/data").and_then(Value::as_str).map(str::to_owned))
+        .collect()
+}
+
+/// OpenAI Images API (`/v1/images/generations`): sends the prompt to the catalog's image model
+/// and returns the pictures as `b64_json`. One image per request; `n` and `size` are not passed on.
+fn handle_image_generation(stream: &mut TcpStream, state: &HubState, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let start = Instant::now();
+    TOTAL_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    let request: Value = serde_json::from_str(body).unwrap_or_default();
+    let Some(prompt) = request.get("prompt").and_then(Value::as_str).filter(|prompt| !prompt.trim().is_empty()) else {
+        FAILED_REQUESTS.fetch_add(1, Ordering::Relaxed);
+        return send_json_response(stream, 400, &json!({"error": {"code": 400, "message": "prompt is required"}}));
+    };
+    let requested = request.get("model").and_then(Value::as_str).unwrap_or("image");
+    let catalog = available_models(state);
+    let upstream_model = catalog
+        .iter()
+        .find(|model| model.id == requested)
+        .or_else(|| catalog.iter().find(|model| model.id.contains("image")))
+        .map_or_else(|| "gemini-3.1-flash-image".to_owned(), |model| model.id.clone());
+    let payload = json!({
+        "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
+        "generationConfig": { "responseModalities": ["TEXT", "IMAGE"] }
+    });
+
+    let result = execute_upstream_request(state, &payload, &upstream_model).and_then(|(upstream, account_email)| {
+        let images = inline_images(&upstream);
+        if images.is_empty() {
+            Err("The image model answered without an image".to_owned())
+        } else {
+            Ok((images, account_email))
+        }
+    });
+    let latency_ms = start.elapsed().as_millis() as u64;
+    LAST_LATENCY_MS.store(latency_ms, Ordering::Relaxed);
+    let (status_code, account_email, response) = match result {
+        Ok((images, account_email)) => {
+            SUCCESS_REQUESTS.fetch_add(1, Ordering::Relaxed);
+            let data: Vec<Value> = images.into_iter().map(|image| json!({ "b64_json": image })).collect();
+            (200, account_email, json!({ "created": chrono::Utc::now().timestamp(), "data": data }))
+        }
+        Err(message) => {
+            FAILED_REQUESTS.fetch_add(1, Ordering::Relaxed);
+            (502, "-".to_owned(), json!({"error": {"code": 502, "message": message}}))
+        }
+    };
+    record_proxy_log(ProxyRequestLog {
+        id: format!("req_{}", chrono::Utc::now().timestamp_millis()),
+        timestamp: chrono::Utc::now().timestamp(),
+        client_protocol: "openai-images".into(),
+        requested_model: requested.into(),
+        upstream_model,
+        account_email,
+        latency_ms,
+        status_code,
+        is_stream: false,
+    });
+    send_json_response(stream, status_code, &response)
+}
+
 /// Handles native Google Gemini API format requests (e.g. /v1beta/models/:model:generateContent)
 fn handle_gemini_native(
     stream: &mut TcpStream,
@@ -1082,7 +1338,7 @@ fn handle_gemini_native(
     let model_part = path.split("/models/").nth(1).unwrap_or("");
     let model_name = model_part.split(':').next().unwrap_or("gemini-2.5-flash");
     let is_stream = path.contains(":streamGenerateContent");
-    let upstream_model = resolve_upstream_model(model_name);
+    let upstream_model = &resolve_upstream_model(model_name);
 
     match execute_upstream_request(state, &req_val, upstream_model) {
         Ok((upstream_res, account_email)) => {
@@ -1176,7 +1432,7 @@ pub fn get_proxy_status(state: &HubState) -> ProxyStatus {
 pub fn test_prompt(state: &HubState, prompt: &str, model: &str) -> Result<(String, u64), String> {
     let start = Instant::now();
     TOTAL_REQUESTS.fetch_add(1, Ordering::Relaxed);
-    let upstream_model = resolve_upstream_model(model);
+    let upstream_model = &resolve_upstream_model(model);
     let payload = json!({
         "contents": [{
             "role": "user",
@@ -1235,10 +1491,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn model_catalog_is_read_from_the_models_map() {
+        let models = parse_model_catalog(&json!({ "models": {
+            "gemini-x-flash": { "displayName": "Gemini X Flash", "quotaInfo": { "remainingFraction": 0.25, "resetTime": "2030-01-01T00:00:00Z" } },
+            "claude-y": {}
+        }}));
+        let flash = models.iter().find(|model| model.id == "gemini-x-flash").unwrap();
+        assert_eq!(flash.display_name.as_deref(), Some("Gemini X Flash"));
+        assert_eq!(flash.remaining_percent, Some(25.0));
+        assert_eq!(flash.reset_at, Some(1_893_456_000));
+        assert_eq!(models.iter().find(|model| model.id == "claude-y").unwrap().remaining_percent, None);
+        assert!(parse_model_catalog(&json!({ "error": {} })).is_empty());
+    }
+
+    #[test]
+    fn user_rules_win_and_support_prefixes() {
+        let rules = vec![
+            ModelMapRule { from: "gpt-4*".into(), to: "gemini-9-flash".into() },
+            ModelMapRule { from: "My-Model".into(), to: "claude-opus-9-0".into() },
+            ModelMapRule { from: "".into(), to: "ignored".into() },
+        ];
+        assert_eq!(mapped_model("gpt-4o-mini", &rules).as_deref(), Some("gemini-9-flash"));
+        assert_eq!(mapped_model("my-model", &rules).as_deref(), Some("claude-opus-9-0"));
+        assert_eq!(mapped_model("gpt-3.5", &rules), None);
+    }
+
+    #[test]
+    fn images_are_collected_from_inline_data_parts() {
+        let upstream = json!({ "response": { "candidates": [
+            { "content": { "parts": [{ "text": "here" }, { "inlineData": { "mimeType": "image/png", "data": "QUJD" } }] } }
+        ]}});
+        assert_eq!(inline_images(&upstream), vec!["QUJD".to_string()]);
+        assert!(inline_images(&json!({ "response": { "candidates": [] } })).is_empty());
+    }
+
+    #[test]
+    fn generated_keys_are_long_and_differ() {
+        let (first, second) = (generate_api_key(), generate_api_key());
+        assert!(first.starts_with("sk-hub-") && first.len() == 7 + 48);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn aliases_follow_the_live_catalog() {
+        let catalog: Vec<ProxyModel> = ["claude-sonnet-9-0-high", "claude-sonnet-9-0-medium", "claude-opus-9-0", "gemini-9-flash"]
+            .into_iter()
+            .map(|id| ProxyModel { id: id.into(), display_name: None, remaining_percent: None, reset_at: None })
+            .collect();
+        assert_eq!(resolve_with_catalog("gemini-9-flash", &catalog), "gemini-9-flash");
+        assert_eq!(resolve_with_catalog("claude-3-7-sonnet", &catalog), "claude-sonnet-9-0-medium");
+        assert_eq!(resolve_with_catalog("claude-opus-4", &catalog), "claude-opus-9-0");
+        // No GPT model in this catalog: the built-in fallback applies.
+        assert_eq!(resolve_with_catalog("gpt-4o", &catalog), "gpt-oss-120b-medium");
+    }
+
+    #[test]
     fn test_resolve_upstream_model() {
         assert_eq!(resolve_upstream_model("gpt-4o"), "gpt-oss-120b-medium");
-        assert_eq!(resolve_upstream_model("claude-3-7-sonnet"), "claude-sonnet-4-6");
-        assert_eq!(resolve_upstream_model("claude-opus-4"), "claude-opus-4-6-thinking");
+        assert_eq!(resolve_upstream_model("claude-3-7-sonnet"), "claude-sonnet-5-5-medium");
+        assert_eq!(resolve_upstream_model("claude-opus-4"), "claude-opus-5-5-medium");
         assert_eq!(resolve_upstream_model("gemini-2.5-pro"), "gemini-pro-agent");
         assert_eq!(resolve_upstream_model("gemini-2.0-flash"), "gemini-3.6-flash-high");
         // lbjlaq feature: Haiku is silently downgraded to Flash to preserve Sonnet quota

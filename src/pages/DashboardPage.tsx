@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Clock3, Pause, Play, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { Activity, ArrowRight, Clock3, Pause, Play, ShieldCheck, Users } from "lucide-react";
 import type { PageId } from "../components/AppShell";
 import { ProviderCard } from "../components/ProviderCard";
 import { api } from "../lib/ipc";
@@ -8,7 +8,7 @@ import { useHub } from "../stores/hub";
 
 export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const { language, t } = useTranslation();
-  const { snapshot, accounts, loading, refreshing, refresh } = useHub();
+  const { snapshot, accounts, loading, refresh } = useHub();
   if (loading || !snapshot) return <DashboardSkeleton />;
   const running = snapshot.applications.filter((app) => app.state === "running");
   const trackedToday = snapshot.applications.reduce((total, app) => total + app.todaySeconds, 0);
@@ -22,7 +22,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => vo
     <>
       <section className="hero-row">
         <div><span className="eyebrow">{t("Good to see you")}</span><h1>{t("Your AI workspace,")}<br /><em>{t("quietly organized.")}</em></h1><p>{t("Live app status and verified provider data — kept local on this PC.")}</p></div>
-        <div className="hero-actions"><button className="secondary-button" onClick={() => void toggleMonitoring()}>{snapshot.monitoringPaused ? <Play size={16} /> : <Pause size={16} />}{t(snapshot.monitoringPaused ? "Resume" : "Pause")} {t("monitoring")}</button><button className="primary-button" onClick={() => void refresh()}><RefreshCw className={refreshing ? "spin" : ""} size={16} />{t("Refresh all")}</button></div>
+        <div className="hero-actions"><button className="secondary-button" onClick={() => void toggleMonitoring()}>{snapshot.monitoringPaused ? <Play size={16} /> : <Pause size={16} />}{t(snapshot.monitoringPaused ? "Resume monitoring" : "Pause monitoring")}</button></div>
       </section>
 
       <section className="summary-strip" aria-label={t("At a glance")}>

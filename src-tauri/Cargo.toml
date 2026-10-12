@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-hub"
-version = "0.1.18"
+version = "0.1.22"
 description = "Local-first AI subscription and application usage dashboard"
 authors = ["AI Usage Hub contributors"]
 license = "MIT"
@@ -23,6 +23,7 @@ sysinfo = "0.39"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

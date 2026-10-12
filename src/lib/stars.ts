@@ -10,7 +10,7 @@ function starField(width: number, height: number) {
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
       const roll = Math.random();
-      if (roll > 0.52) continue;
+      if (roll > 0.8) continue;
 
       const x = Math.round((column + 0.15 + Math.random() * 0.7) * width / columns);
       const y = Math.round((row + 0.15 + Math.random() * 0.7) * height / rows);
@@ -29,7 +29,7 @@ function starField(width: number, height: number) {
     }
   }
 
-  const dots = Math.round((width * height * 72) / (1200 * 840));
+  const dots = Math.round((width * height * 120) / (1200 * 840));
   for (let dot = 0; dot < dots; dot++) {
     const x = Math.round(Math.random() * width);
     const y = Math.round(Math.random() * height);

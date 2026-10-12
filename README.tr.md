@@ -1,15 +1,15 @@
 <div align="center">
   <img src="docs/images/logo.svg" alt="AI Usage Hub Logo" width="84" height="84">
   <h1>AI Usage Hub</h1>
-  <p><strong>Windows İçin Gizlilik Odaklı Çoklu Yapay Zekâ Kontrol Merkezi, Yerel API Ağ Geçidi ve Sıfır Yeniden Başlatmalı Antigravity Hesap Yöneticisi.</strong></p>
+  <p><strong>Windows için yerel yapay zekâ kullanım paneli, Antigravity hesap değiştirici ve yerel API proxy.</strong></p>
 
   <p>
     <strong>Dil:</strong> <a href="README.tr.md"><strong>TR</strong></a> | <a href="README.md"><strong>EN</strong></a>
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Sürümü İndir</a> ·
-    <a href="#-hızlı-istemci-kurulumları">İstemci Ayarları</a> ·
-    <a href="#-mimari">Mimari</a> ·
-    <a href="#-destek-ve-sponsorluk">Kahve Ismarla</a>
+    <a href="#araçları-bağlama">Araçları bağlama</a> ·
+    <a href="#nasıl-çalışır">Nasıl çalışır</a> ·
+    <a href="#destek">Kahve Ismarla</a>
   </p>
 
   <p>
@@ -26,7 +26,7 @@
 
 ---
 
-## ☕ Destek ve Sponsorluk
+## Destek
 
 Eğer **AI Usage Hub** abonelik karmaşanı çözüyor, geliştirme iş akışını hızlandırıyor veya kota kilitlenmelerini önlüyorsa, projeyi destekleyebilir ve bir kahve ısmarlayabilirsin:
 
@@ -41,222 +41,185 @@ Eğer **AI Usage Hub** abonelik karmaşanı çözüyor, geliştirme iş akışı
   <p><sub><em>Desteğin sayesinde proje tamamen bağımsız, ücretsiz ve sağlayıcı güncellemelerine karşı daima güncel kalır.</em></sub></p>
 </div>
 
----
 
-## 🚀 Genel Bakış
+## Genel bakış
 
-**AI Usage Hub**, yazılımcılar ve yapay zekâ profesyonelleri için geliştirilmiş hafif ve tamamen yerel çalışan bir Windows uygulamasıdır. Sağlayıcı kotalarını, aktif oturumları, çalışma süresi analizlerini ve çoklu hesap geçişlerini tek bir modern panelde birleştirir.
+**AI Usage Hub**, yapay zekâ aboneliklerinizden ne kadar hakkınız kaldığını tek ekranda gösteren küçük bir Windows uygulamasıdır. Kotayı bilgisayarınızda zaten oturum açmış araçlardan (Codex, Claude Code ve Claude Desktop, Google Antigravity, OpenCode) okur ve her şeyi yerel bir veritabanında tutar. Telemetri yoktur, bizde hesap açmanız gerekmez.
 
-Uygulama ayrıca bünyesinde **yüksek performanslı yerel bir AI API Ağ Geçidi** (`http://127.0.0.1:8046`) barındırır. Bu sayede harici geliştirme araçların (**Claude Code CLI, Cursor, Windsurf, Aider, Cline, Continue.dev**), mevcut yapay zekâ hesaplarını otomatik 429 kota rotasyonu, yerel düşünme bütçesi (reasoning budget) yönetimi ve sıfır veri sızıntısıyla doğrudan kullanabilir.
+Google Antigravity için daha fazlasını yapar: Google hesaplarınızı bir havuzda tutar, her birinin gerçek kotasını gösterir, IDE'yi hesaplar arasında değiştirir ve bu hesapları yerel bir API proxy üzerinden başka araçlara açabilir.
 
----
+## Ekran görüntüleri
 
-## 📸 Görsel Tur
-
-| **Genel Panel ve Çalışma Süresi Analitiği** |
+| Genel bakış |
 | :---: |
-| ![Dashboard Görünümü](docs/images/dashboard.svg) |
-| *Gerçek zamanlı uygulama çalışma süreleri, kayan 5 saatlik kota pencereleri ve aktif işlem takibi.* |
+| ![Genel bakış](docs/images/dashboard.jpg) |
+| *Sağlayıcı kotaları, sıfırlanma zamanları ve çalışan yapay zekâ uygulamaları.* |
 
-| **Antigravity Çoklu Hesap Havuzu ve Canlı Geçiş Sistemi** |
+| Antigravity hesap havuzu |
 | :---: |
-| ![Antigravity Hesap Havuzu](docs/images/antigravity-pool.svg) |
-| *3 kademeli otoriter canlı oturum algılama, IDE kapatmadan anında hot-switch ve 429 kota rotasyonu.* |
+| ![Antigravity hesap havuzu](docs/images/accounts.jpg) |
+| *Canlı IDE oturumu, hesap başına 5 saatlik ve haftalık kota, geçiş ve otomatik geçiş.* |
 
-| **Yerel AI API Ağ Geçidi (`127.0.0.1:8046`)** |
+| Yerel API proxy |
 | :---: |
-| ![API Proxy Görünümü](docs/images/proxy-matrix.svg) |
-| *Çift protokol desteği (OpenAI + Anthropic), Claude 3.7 reasoning bütçesi ve hazır istemci şablonları.* |
+| ![API proxy](docs/images/api-proxy.jpg) |
+| *Proxy adresi, API anahtarı, model kuralları ve yaygın araçlar için hazır ayarlar.* |
 
----
+Ekran görüntüleri uygulamanın yerleşik önizleme verisiyle alınmıştır (arayüz İngilizce modda).
 
-## ✨ Temel Özellikler
+## Özellikler
 
-### ⚡ Antigravity Çoklu Hesap Havuzu ve Canlı Hot-Switch
-- **3 Kademeli Otoriter Canlı Oturum Tespiti:** Aktif Google Antigravity hesabını LanguageServer IPC işlem portları (1. Kademe), Windows Kimlik Bilgisi Yöneticisi (2. Kademe) ve `state.vscdb` yerel veritabanları (3. Kademe) ile eşzamanlı doğrular. Asla eski veya yanlış hesap bilgisi göstermez.
-- **Sıfır Yeniden Başlatmalı Anında Hesap Geçişi (Hot-Switch):** Editörünü veya IDE'ni kapatmana gerek kalmadan iş, kişisel ve test hesapların arasında tek tıkla geçiş yap. Arka plandaki eski LanguageServer süreçlerini otomatik temizler (`kill_antigravity_language_servers`).
-- **Kayan 5 Saatlik Kota Matematiği:** Gemini ve Claude kotalarını kayan zaman damgalarıyla doğru hesaplar; kullanıcıları mağdur eden sahte %0 kota kilitlenmesi sorununu kökten çözer.
-- **Resmî Google OAuth 2.0 Desteği:** Yerel `8045` portu üzerinden güvenli ve tarayıcı tabanlı OAuth yetkilendirmesi.
-- **429 Hata Anında Otomatik Hesap Rotasyonu:** Bir hesap saatlik istek sınırına ulaştığında (429 Too Many Requests), istekleri havuzdaki yedek hesaba sessizce ve kesintisiz devreder.
-- **Şifrelenmiş Yerel Depolama:** Tüm oturum belirteçleri Windows DPAPI / AES-256-GCM ile bilgisayarında yerel olarak mühürlenir.
+### Kullanım paneli
 
-### 🌐 Yüksek Performanslı Yerel AI API Ağ Geçidi (`127.0.0.1:8046`)
-- **Çift Protokol Uyumluluğu:** İki popüler standardı da yerel olarak sunar:
-  - `POST /v1/chat/completions` (Cursor, Windsurf ve Aider için OpenAI standardı)
-  - `POST /v1/messages` (Claude Code CLI için Anthropic standardı)
-- **Claude 3.7 Sonnet Düşünme Bütçesi (Reasoning Budget):** Gelişmiş düşünme parametrelerini (`thinkingConfig.thinkingBudget`) tam uyumlulukla karşılar ve modeller arası haritalandırır.
-- **Sessiz Arka Plan İndirgemesi:** Kod indeksleme veya rutin arka plan görevlerini otomatik olarak hafif modellere (örn. Gemini 2.5 Flash) yönlendirerek ana kotanın erken tükenmesini engeller.
-- **Gerçek Zamanlı SSE Token Akışı (Streaming):** Düşük gecikmeli token akışı ve canlı bağlantı havuzu.
-- **%100 Çevrimdışı ve Yerel İletim:** Doğrudan yerel geliştirme aracın ile hedef uç noktası arasında çalışır; aracı sunucu, bulut analitiği veya telemetri içermez.
+- **ChatGPT / Codex:** ortak 5 saatlik ve haftalık pencereler ile sıfırlanma zamanları, oturum açık Codex uygulamasından okunur.
+- **Claude Desktop / Claude Code:** ortak 5 saatlik ve haftalık kota ile yerel token toplamları.
+- **Google Antigravity:** Gemini ve Claude/GPT kota pencereleri, Google One AI kredi bakiyesi, Antigravity'nin prompt ve flow kredileri.
+- **OpenCode:** bağlı sağlayıcılar, ücretsiz model kataloğu, yerel token ve maliyet toplamları.
+- Her değer *Resmi*, *Yerel*, *Hesaplandı* veya *Kullanılamıyor* olarak etiketlenir. Uygulama okuyamadığı bir sayıyı göstermez.
+- Kota belirlediğiniz eşiğin altına düştüğünde yerel uyarı, isterseniz Windows bildirimi.
+- Her yapay zekâ uygulamasının bugün ve bu hafta ne kadar açık kaldığını izler.
 
-### 📊 Çoklu Sağlayıcı AI Komuta Merkezi
-- **ChatGPT & OpenAI Codex:** Ortak 5 saatlik ve haftalık kota çubukları, geri sayım sayaçları, plan seviyeleri ve yerel token istatistikleri.
-- **Claude Desktop & Claude Code CLI:** Yerel plan geçmişi takibi, canlı işlem durumları ve cihaz genelindeki token sayaçları.
-- **Google Antigravity:** Gemini 2.5 Pro / Flash ve Claude 3.7 Sonnet kotaları anlık izleme.
-- **OpenCode & Topluluk Araçları:** Yerel oturum kayıtları, model eşleştirmeleri ve süreç sağlık kontrolleri.
+### Antigravity hesap havuzu
 
-### 🔒 %100 Gizlilik ve Yerel Mimari
-- **Sıfır Telemetri:** Hiçbir kullanıcı verisi, çökme kaydı veya kullanım telemetrisi toplanmaz ve harici sunuculara iletilmez.
-- **Yerel SQLite Veritabanı (`ai-usage-hub.sqlite3`):** Tüm veriler WAL modunda `%APPDATA%\com.aiusagehub.desktop\` dizininde yerel olarak saklanır.
-- **Doğrulanmış Veri Kaynakları:** Değerler *Resmî*, *Yerel*, *Hesaplanan* veya *Kullanılamıyor* etiketleriyle sunulur; asla uydurma kota gösterilmez.
+- **Canlı oturum algılama:** çalışan Antigravity dil sunucusuna hangi hesabın açık olduğunu sorar; IDE kapalıyken Windows Kimlik Yöneticisi'ne ve Antigravity'nin yerel durumuna bakar.
+- **Her hesap için gerçek kota:** havuzdaki her hesabın 5 saatlik ve haftalık pencereleri, sıfırlanma zamanlarıyla, on dakikada bir Google'dan yenilenir.
+- **Hesap geçişi:** seçilen hesabın girişini Windows Kimlik Yöneticisi'ne yazar ve Antigravity'nin dil sunucusunu yeniden başlatır. Ardından IDE'nin hangi hesabı bildirdiğine bakar; hâlâ eski hesapsa önceki girişi geri yükler ve bunu söyler.
+- **Otomatik geçiş:** etkin hesap eşiğin altına düştüğünde veya oran sınırına takıldığında sağlıklı başka bir hesaba geçer.
+- **Hesap ekleme:** tarayıcıda Google ile giriş, IDE'de açık olan hesabı yakalama veya JSON içe aktarma.
+- **Toplu silme**, arama, sıralama, kart ve liste görünümü, JSON dışa/içe aktarma.
 
----
+### Yerel API proxy (`http://127.0.0.1:8046`)
 
-## 🏗️ Mimari
+- **Üç API biçimi:** OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`) ve Gemini (`/v1beta/models/...:generateContent`).
+- **Görsel üretimi:** OpenAI Images biçimi (`/v1/images/generations`), sonuç `b64_json` olarak döner.
+- **Canlı model listesi:** `/v1/models` ve test paneli, hesabınızın gerçekten çağırabildiği modelleri Google'dan okuyarak gösterir. Gerçek model kimlikleri aynen geçer; `claude-3-7-sonnet` veya `gpt-4o` gibi tanıdık adlar güncel karşılığına eşlenir.
+- **Model kuralları:** bir aracın istediği model adını sizin seçtiğiniz modele yönlendirir (örneğin `gpt-4*` → bir Gemini modeli).
+- **API anahtarı:** proxy, uygulamada gösterilen anahtarı göndermeyen istekleri reddeder. Yalnızca `127.0.0.1` üzerinde dinler.
+- **Yedek hesaba geçiş:** 429 veya 403 yanıtında hesabı işaretler ve sıradaki sağlıklı hesapla yeniden dener.
+- **Haiku düşürme:** Haiku sınıfı model istekleri (Claude Code'un başlık üretimi gibi arka plan işleri) Claude kotasını korumak için bir Flash modeline gider.
+
+Bilinmesi gereken sınırlar: akış (streaming) yanıtları token token değil tek parça olarak iletilir ve istek başına bir görsel üretilir.
+
+> [!WARNING]
+> Havuzdaki Google hesaplarını yerel bir proxy üzerinden kullanmak Google'ın Kullanım Şartları'nı ihlal edebilir ve hesabın askıya alınmasına yol açabilir. Kullanım paneli proxy'ye ihtiyaç duymaz; proxy'yi kendi sorumluluğunuzda kullanın.
+
+## Nasıl çalışır
 
 ```mermaid
-flowchart TD
-    subgraph IDE_Tools ["Harici Geliştirici Araçları"]
-        CC["Claude Code CLI"]
-        CU["Cursor / Windsurf"]
-        AI["Aider / Cline / Continue"]
+flowchart LR
+    subgraph Tools["Araçlarınız"]
+        CC["Claude Code"]
+        ED["Cursor, Aider, Cline, Continue"]
     end
 
-    subgraph Hub ["AI Usage Hub (Yerel Windows Uygulaması)"]
-        subgraph Gateway ["Yerel API Proxy (127.0.0.1:8046)"]
-            PR["Protokol Çevirici\nOpenAI / Anthropic"]
-            RM["Düşünme Bütçesi Eşleyici\nClaude 3.7 Thinking"]
-            AR["429 Otomatik Rotasyon Motoru"]
-        end
-
-        subgraph AccountPool ["Antigravity Hesap Havuzu"]
-            T1["1. Kademe: LanguageServer IPC (Port Taraması)"]
-            T2["2. Kademe: Windows Kimlik Kasası"]
-            T3["3. Kademe: Yerel state.vscdb"]
-            HS["Sıfır Yeniden Başlatmalı Hot-Switcher"]
-        end
-
-        subgraph Core ["Masaüstü Çekirdeği (Tauri 2 + Rust)"]
-            DB[("SQLite Veritabanı\nWAL Modu")]
-            PM["İşlem Takibi ve Kota Matematiği"]
-        end
+    subgraph Hub["AI Usage Hub (Tauri 2 + Rust)"]
+        PX["Yerel proxy<br/>127.0.0.1:8046"]
+        POOL["Hesap havuzu<br/>ve geçiş"]
+        MON["Kota okuyucular<br/>ve işlem izleme"]
+        DB[("SQLite<br/>tokenlar DPAPI ile şifreli")]
     end
 
-    subgraph Upstream ["Sağlayıcı Uç Noktaları"]
-        GAPI["Google Antigravity / LanguageServer"]
-        OAPI["OpenAI Platformu"]
-        AAPI["Anthropic Platformu"]
+    subgraph Local["Bu bilgisayarda"]
+        AG["Antigravity dil sunucusu"]
+        WCM["Windows Kimlik Yöneticisi"]
+        APPS["Codex, Claude, OpenCode"]
     end
 
-    CC -->|ANTHROPIC_BASE_URL| PR
-    CU -->|OpenAI Base URL| PR
-    AI -->|OpenAI Base URL| PR
+    G["Google Cloud Code API"]
 
-    PR --> RM --> AR
-    AR -->|Aktif Hesap| HS
-    HS --> GAPI
-    AR -.->|Doğrudan İletim| OAPI
-    AR -.->|Doğrudan İletim| AAPI
-
-    AccountPool --> Core
-    Gateway --> Core
+    CC -->|"Anthropic biçimi + anahtar"| PX
+    ED -->|"OpenAI biçimi + anahtar"| PX
+    PX --> POOL
+    POOL -->|"kota, modeller, istekler"| G
+    POOL -->|"hesap geçişi"| WCM
+    MON -->|"canlı oturum ve kota"| AG
+    MON --> APPS
+    POOL --> DB
+    MON --> DB
 ```
 
----
+## Araçları bağlama
 
-## 🛠️ Hızlı İstemci Kurulumları
+API anahtarını uygulamadaki **API Proxy** sayfasından kopyalayın ve aşağıda `ANAHTARINIZ` yazan yerlerde kullanın. Uygulama bu örnekleri anahtarınız doldurulmuş olarak da gösterir.
 
-Harici geliştirme araçlarını AI Usage Hub yerel API ağ geçidine (`http://127.0.0.1:8046`) bağlamak için aşağıdaki ayarları kullanabilirsin:
+**Claude Code**
 
-### 1. Claude Code CLI
-PowerShell veya komut satırında ortam değişkenlerini tanımla:
 ```powershell
-$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8046"
-$env:ANTHROPIC_API_KEY = "hub-local-proxy"
+$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8046"
+$env:ANTHROPIC_API_KEY="ANAHTARINIZ"
 claude
 ```
-> *Claude 3.7 Sonnet düşünme bütçesi ve mantık yürütme tokenları yerel olarak otomatik dönüştürülür.*
 
-### 2. Cursor ve Windsurf
-1. **Cursor Ayarları** → **Models** (veya Windsurf Model Ayarları) sekmesine git.
-2. **Override OpenAI Base URL** alanını şu şekilde ayarla:
-   ```
-   http://127.0.0.1:8046/v1
-   ```
-3. API Anahtarı olarak `hub-local-proxy` gir.
-4. İstediğin modelleri etkinleştir: `gemini-2.5-pro`, `gemini-2.5-flash`, `claude-3-7-sonnet`.
+**Cursor, Roo Code, Cherry Studio ve diğer OpenAI uyumlu araçlar**
 
-### 3. Aider (Terminal Yapay Zekâ Eş Programcısı)
-Aider'ı yerel proxy üzerinden başlat:
+- Base URL: `http://127.0.0.1:8046/v1`
+- API anahtarı: `ANAHTARINIZ`
+- Model: uygulamadaki model listesinden bir kimlik veya `claude-3-7-sonnet` gibi tanıdık bir ad
+
+**Aider**
+
 ```powershell
-aider --openai-api-base http://127.0.0.1:8046/v1 --openai-api-key hub-local-proxy --model gemini-2.5-pro
+$env:OPENAI_API_BASE="http://127.0.0.1:8046/v1"
+$env:OPENAI_API_KEY="ANAHTARINIZ"
+aider --model openai/claude-3-7-sonnet
 ```
 
-### 4. Cline / Roo Code (VS Code Eklentisi)
-1. Cline ayarlarında API Sağlayıcısı olarak **OpenAI Compatible** seç.
-2. **Base URL**: `http://127.0.0.1:8046/v1`
-3. **API Key**: `hub-local-proxy`
-4. **Model ID**: `gemini-2.5-pro` (veya `claude-3-7-sonnet`)
+**Görsel üretimi**
 
----
+```powershell
+curl http://127.0.0.1:8046/v1/images/generations -H "Authorization: Bearer ANAHTARINIZ" -H "Content-Type: application/json" -d '{\"prompt\": \"koyu zeminde pembe bir yıldız\"}'
+```
 
-## 📥 İndir ve Kur
+## İndirme ve kurulum
 
-1. [En Son Sürüm](https://github.com/Hfatih/ai-usage-hub/releases/latest) sayfasından Windows kurulum paketini (`AI-Usage-Hub-Setup-x64.exe`) indir.
-2. Kurulumu çalıştır. Yalnızca mevcut Windows kullanıcısına kurulur; yönetici izni gerekmez.
-3. **AI Usage Hub**'ı başlat ve yerel hesaplarını bağla.
-4. Dilediğin zaman **Settings → Language** bölümünden Türkçe veya İngilizce arasında geçiş yapabilirsin.
+1. Windows kurulum dosyasını [son sürüm](https://github.com/Hfatih/ai-usage-hub/releases/latest) sayfasından indirin.
+2. Çalıştırın. Geçerli Windows kullanıcısı için kurulur, yönetici yetkisi gerekmez.
+3. **AI Usage Hub**'ı açın. İlgili araç bu bilgisayarda oturum açmışsa hesaplar kendiliğinden görünür.
+4. Türkçe arayüz için **Settings → Language** yolunu izleyin.
 
 > [!NOTE]
-> Windows 10/11 ve Microsoft Edge WebView2 gereklidir. Henüz dijital olarak açık kaynak topluluk imzalı olduğu için Windows SmartScreen ilk açılışta onay uyarısı verebilir. Releases sayfasındaki SHA-256 sağlama toplamını doğrulayabilirsin.
+> Windows 10/11 ve Microsoft Edge WebView2 gerekir. Kurulum dosyası kod imzalı değildir, bu yüzden Windows SmartScreen ilk çalıştırmada uyarı gösterebilir; her sürümde karşılaştırabileceğiniz bir SHA-256 değeri bulunur. Otomatik güncelleme yoktur: yeni sürümü eskisinin üzerine kurun.
 
----
+0.1.21 veya daha eski bir sürümden geçiyorsanız: proxy artık API anahtarı istiyor. Eski yer tutucu anahtarla ayarlanmış araçlara API Proxy sayfasındaki yeni anahtarı girmeniz gerekir.
 
-## 🔨 Kaynaktan Derleme
+## Kaynaktan derleme
 
-### Gereksinimler
-- Windows 10/11 (x64)
-- [Node.js](https://nodejs.org/) v20+
-- [Rust MSVC araç zinciri](https://rustup.rs/) (kararlı sürüm)
-- Microsoft Visual C++ Build Tools (C++ ile masaüstü geliştirme paketi)
+Gerekenler: Windows 10/11 x64, [Node.js](https://nodejs.org/) 20+, [Rust MSVC araç zinciri](https://rustup.rs/) ve Microsoft C++ Build Tools.
 
-### Geliştirici Modunda Çalıştırma
 ```powershell
-# Depoyu klonla
 git clone https://github.com/Hfatih/ai-usage-hub.git
 cd ai-usage-hub
-
-# Paket bağımlılıklarını kur
 npm ci
-
-# Tauri geliştirici uygulamasını başlat
 npm run tauri dev
 ```
 
-### Kurulum Paketi (NSIS) Oluşturma
-Üretim için imzalı/imzasız Windows kurulum paketi üretmek için:
+Kurulum dosyası üretmek için (çıktı `src-tauri/target/release/bundle/nsis/` altına yazılır):
+
 ```powershell
 npm run tauri build
 ```
-Oluşturulan kurulum dosyası şurada yer alır:
-`src-tauri/target/release/bundle/nsis/`
 
-### Testleri Çalıştırma
+Testler:
+
 ```powershell
-# Ön yüz birim testleri
 npm test
-
-# Ön yüz derleme kontrolü
 npm run build
-
-# Rust arka uç test paketi
 cd src-tauri
 cargo test --locked
 ```
 
----
+## Veri ve güvenlik
 
-## 📁 Veri Depolama ve Güvenlik
+- **Verinin yeri:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`, yalnızca bu bilgisayarda.
+- **Parola yok:** uygulama Google, OpenAI veya Anthropic parolanızı hiçbir zaman istemez ve saklamaz.
+- **Giriş tokenları:** Codex ve Claude kimlik bilgilerini kendileri saklar; uygulama onlar için yalnızca etiket ve kullanım kaydı tutar. Antigravity havuz hesapları için Google OAuth tokenlarını, Windows kullanıcınıza özel olarak Windows DPAPI ile şifreleyip saklar. Kopyalanan veritabanı başka bir Windows kullanıcısında okunamaz.
+- **Dışa aktarma:** dışa aktarılan hesap JSON'u tokenları düz metin olarak içerir. Parola gibi saklayın.
+- **Proxy:** yalnızca `127.0.0.1` üzerinde dinler ve siz kapatmadıkça API anahtarı ister.
+- **Telemetri yok:** uygulama yalnızca sağlayıcıların kendi uç noktalarıyla konuşur.
+- Uygulamadaki **Güvenlik** sayfası neyin saklandığını gösterir ve kullanım geçmişini temizlemenizi sağlar. Güvenlik açığı bildirmek için [SECURITY.md](SECURITY.md) dosyasına bakın.
 
-- **Veritabanı Konumu:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`
-- **Sıfır Parola Saklama:** AI Usage Hub asla Google veya OpenAI gibi hesap parolalarını talep etmez ya da düz metin olarak kaydetmez.
-- **DPAPI Şifrelemesi:** Oturum belirteçleri Windows Veri Koruma API'si (DPAPI) ile mühürlenir.
-- Güvenlik açığı bildirim süreci için [SECURITY.md](SECURITY.md) dosyasına bakabilirsiniz.
-
----
-
-## 📄 Lisans ve Yasal Uyarı
+## Lisans ve yasal uyarı
 
 Bu proje [MIT Lisansı](LICENSE) kapsamında yayımlanmıştır.
 
-*AI Usage Hub bağımsız bir açık kaynak topluluk projesidir. Google Antigravity, OpenAI ChatGPT, Anthropic Claude, Cursor ve adı geçen diğer ticari markalar ilgili hak sahiplerine aittir.*
+AI Usage Hub bağımsız bir açık kaynak projesidir; Google, OpenAI veya Anthropic ile bağlantısı yoktur. Belgelenmemiş yerel ve dahili arayüzlere dayanır; bunlar haber verilmeden değişebilir. Ürün adları ilgili sahiplerinin ticari markalarıdır.

@@ -7,6 +7,7 @@ mod i18n;
 mod models;
 pub mod proxy;
 mod providers;
+mod secret;
 
 use std::{
     fs,
@@ -29,6 +30,7 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_notification::NotificationExt;
 
 pub struct HubState {
     pub(crate) database: Mutex<Database>,
@@ -104,9 +106,10 @@ fn refresh_providers(state: &HubState, force: bool) -> Result<bool> {
                     if let Err(error) = database.save_provider_snapshot(provider) {
                         tracing::warn!(%error, "could not persist provider usage snapshot");
                     }
-                    if provider.id == "google" {
-                        let _ = antigravity::sync_antigravity_active_session(&database);
-                    }
+                }
+                // Outside the lock: the sync talks to the language server.
+                if provider.id == "google" {
+                    let _ = antigravity::sync_antigravity_active_session(&state.database);
                 }
             } else if let Ok(database) = state.database.lock() {
                 if let Err(error) = database.record_provider_error(provider) {
@@ -285,11 +288,51 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+fn latest_alert_id(state: &HubState) -> i64 {
+    state
+        .database
+        .lock()
+        .ok()
+        .and_then(|db| db.notifications(1).ok())
+        .and_then(|alerts| alerts.first().map(|alert| alert.id))
+        .unwrap_or(0)
+}
+
+/// Raises a Windows toast for each usage alert recorded since `before` (at most three per pass),
+/// so a low quota is noticed while the window is hidden in the tray.
+fn show_new_alerts(app: &tauri::AppHandle, state: &HubState, before: i64) {
+    let Ok(db) = state.database.lock() else { return };
+    let Ok(settings) = db.settings() else { return };
+    if !settings.desktop_notifications || !settings.notifications_enabled {
+        return;
+    }
+    let alerts = db.notifications(3).unwrap_or_default();
+    drop(db);
+    for alert in alerts.iter().rev().filter(|alert| alert.id > before) {
+        let (title, body) = i18n::alert_text(&alert.title, alert.detail.as_deref(), &settings.language);
+        if let Err(error) = app.notification().builder().title(title).body(body).show() {
+            tracing::warn!(%error, "could not show desktop notification");
+        }
+    }
+}
+
 fn start_monitor(app: tauri::AppHandle) {
-    thread::spawn(move || loop {
+    thread::spawn(move || {
+      let mut last_pool_refresh: Option<Instant> = None;
+      loop {
         let state = app.state::<HubState>();
+        // Pull real quota for every pooled account from Google every ten minutes, so the
+        // accounts that are not open in the IDE do not sit on stale numbers.
+        if last_pool_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(600)) {
+            last_pool_refresh = Some(Instant::now());
+            if !state.paused.load(Ordering::Relaxed) {
+                let _ = antigravity::refresh_all_accounts(&state.database);
+            }
+        }
+        let alerts_before = latest_alert_id(&state);
         match refresh_all(&state, false) {
             Ok((snapshot, changed)) => {
+                show_new_alerts(&app, &state, alerts_before);
                 let running = snapshot
                     .applications
                     .iter()
@@ -323,6 +366,7 @@ fn start_monitor(app: tauri::AppHandle) {
             .unwrap_or(5)
             .clamp(3, 300);
         thread::sleep(Duration::from_secs(interval));
+      }
     });
 }
 
@@ -355,6 +399,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -378,6 +423,15 @@ pub fn run() {
             };
             app.manage(HubState::new(database));
             let state = app.state::<HubState>();
+            if let Ok(db) = state.database.lock() {
+                if let Ok(mut settings) = db.settings() {
+                    if settings.proxy_api_key.is_empty() {
+                        settings.proxy_api_key = proxy::generate_api_key();
+                        let _ = db.save_settings(&settings);
+                    }
+                    proxy::set_model_map(settings.proxy_model_map);
+                }
+            }
             if let Err(e) = refresh_state(&state) {
                 tracing::warn!(error = %e, "refresh_state failed during setup");
             }
@@ -446,6 +500,8 @@ pub fn run() {
             commands::sync_antigravity_session,
             commands::get_proxy_status,
             commands::test_proxy_prompt,
+            commands::get_proxy_models,
+            commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
         ])
         .run(tauri::generate_context!())

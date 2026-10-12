@@ -1,4 +1,4 @@
-import { Boxes, CheckCircle2, CircleOff, ExternalLink, FolderSearch, RefreshCw, ShieldCheck } from "lucide-react";
+import { Boxes, CheckCircle2, CircleOff, ExternalLink, FolderSearch, ShieldCheck } from "lucide-react";
 import type { PageId } from "../components/AppShell";
 import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
@@ -15,7 +15,7 @@ const setupText: Record<string, string> = {
 
 export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const { language, t } = useTranslation();
-  const { snapshot, accounts, refresh, refreshing } = useHub();
+  const { snapshot, accounts, refresh } = useHub();
   if (!snapshot) return null;
 
   async function browse(appId: string) {
@@ -26,7 +26,7 @@ export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) =>
   }
 
   return <section>
-    <div className="page-heading"><div><span className="eyebrow">{t("Integration center")}</span><h1>{t("Integrations")}</h1><p>{t("Real accounts, quota sources, application links and setup status in one place.")}</p></div><button className="primary-button" onClick={() => void refresh()} disabled={refreshing}><RefreshCw className={refreshing ? "spin" : ""} size={16} />{t("Refresh integrations")}</button></div>
+    <div className="page-heading"><div><span className="eyebrow">{t("Integration center")}</span><h1>{t("Integrations")}</h1><p>{t("Real accounts, quota sources, application links and setup status in one place.")}</p></div></div>
     <div className="integration-grid">{snapshot.providers.map((provider) => {
       const apps = snapshot.applications.filter((app) => app.providerId === provider.id);
       const saved = accounts.filter((account) => account.providerId === provider.id);

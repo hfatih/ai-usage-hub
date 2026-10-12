@@ -201,6 +201,7 @@ pub struct SecurityStatus {
     pub usage_snapshot_count: i64,
     pub stored_secret_count: i64,
     pub provider_credentials_stored: bool,
+    pub secrets_encrypted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -212,6 +213,8 @@ pub struct AntigravityQuotaDetails {
     pub claude_5h: Option<f64>,
     pub claude_weekly: Option<f64>,
     pub claude_reset_at: Option<i64>,
+    pub gemini_weekly_reset_at: Option<i64>,
+    pub claude_weekly_reset_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,6 +269,19 @@ pub struct AppSettings {
     pub antigravity_switch_threshold: u8,
     pub antigravity_switch_on_rate_limit: bool,
     pub antigravity_switch_strategy: String,
+    pub desktop_notifications: bool,
+    pub proxy_api_key: String,
+    pub proxy_require_key: bool,
+    pub proxy_model_map: Vec<ModelMapRule>,
+}
+
+/// A user rule sending one client-side model name to a chosen upstream model. `from` is matched
+/// case-insensitively and may end with `*` to match a prefix.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ModelMapRule {
+    pub from: String,
+    pub to: String,
 }
 
 impl Default for AppSettings {
@@ -287,6 +303,10 @@ impl Default for AppSettings {
             antigravity_switch_threshold: 5,
             antigravity_switch_on_rate_limit: true,
             antigravity_switch_strategy: "highest_quota".into(),
+            desktop_notifications: true,
+            proxy_api_key: String::new(),
+            proxy_require_key: true,
+            proxy_model_map: Vec::new(),
         }
     }
 }
