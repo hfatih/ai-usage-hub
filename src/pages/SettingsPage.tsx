@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useHub } from "../stores/hub";
 import { useTranslation } from "../i18n";
 import type { AppSettings } from "../types";
+import { byPlatform } from "../lib/platform";
 
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -42,8 +43,8 @@ export function SettingsPage() {
             <div>
               <Power size={19} />
               <span>
-                <strong>{t("Windows startup")}</strong>
-                <small>{t("Start quietly in the system tray after sign-in.")}</small>
+                <strong>{t(byPlatform("Windows startup", "Open at login"))}</strong>
+                <small>{t(byPlatform("Start quietly in the system tray after sign-in.", "Start quietly in the menu bar after you log in."))}</small>
               </span>
             </div>
             <label className="switch">
@@ -87,7 +88,7 @@ export function SettingsPage() {
               </span>
             </div>
             <select value={draft.closeBehavior} onChange={(event) => update("closeBehavior", event.target.value as AppSettings["closeBehavior"])}>
-              <option value="tray">{t("Minimize to tray")}</option>
+              <option value="tray">{t(byPlatform("Minimize to tray", "Hide to menu bar"))}</option>
               <option value="quit">{t("Quit application")}</option>
             </select>
           </div>

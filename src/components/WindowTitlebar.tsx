@@ -2,12 +2,21 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { useTranslation } from "../i18n";
+import { isMac } from "../lib/platform";
 import { BrandMark } from "./BrandMark";
 
 export function WindowTitlebar({ appName }: { appName: string }) {
   const { t } = useTranslation();
   const native = isTauri();
   const toggleMaximize = () => { if (native) void getCurrentWindow().toggleMaximize(); };
+
+  // macOS draws its own close/minimize/zoom buttons over the left edge of this bar.
+  if (isMac) return <header className="window-titlebar window-titlebar--mac">
+    <div className="window-titlebar__identity" data-tauri-drag-region>
+      <BrandMark small /><strong>{appName}</strong>
+    </div>
+    <div className="window-titlebar__drag" data-tauri-drag-region />
+  </header>;
 
   return <header className="window-titlebar">
     <div className="window-titlebar__identity" data-tauri-drag-region>

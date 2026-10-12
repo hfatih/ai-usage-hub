@@ -13,7 +13,9 @@ use crate::{
 };
 
 /// Matches pool accounts that still hold a sign-in token in plain text.
-const PLAIN_TOKEN_FILTER: &str = "(access_token <> '' AND access_token NOT LIKE 'dpapi:%') OR (refresh_token <> '' AND refresh_token NOT LIKE 'dpapi:%') OR (COALESCE(id_token, '') <> '' AND id_token NOT LIKE 'dpapi:%')";
+/// Rows holding a token in neither protected form (`dpapi:` on Windows, `keychain:` on macOS;
+/// see `secret::PROTECTED_PREFIXES`).
+const PLAIN_TOKEN_FILTER: &str = "(access_token <> '' AND access_token NOT LIKE 'dpapi:%' AND access_token NOT LIKE 'keychain:%') OR (refresh_token <> '' AND refresh_token NOT LIKE 'dpapi:%' AND refresh_token NOT LIKE 'keychain:%') OR (COALESCE(id_token, '') <> '' AND id_token NOT LIKE 'dpapi:%' AND id_token NOT LIKE 'keychain:%')";
 
 pub struct Database {
     connection: Connection,
@@ -994,7 +996,7 @@ fn seed_applications() -> Vec<ApplicationDefinition> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn pool_tokens_are_encrypted_at_rest_and_legacy_rows_are_upgraded() {
         let database = Database::memory().unwrap();

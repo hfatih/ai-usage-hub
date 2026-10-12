@@ -3,6 +3,7 @@ import type { PageId } from "../components/AppShell";
 import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
+import { byPlatform } from "../lib/platform";
 
 const setupText: Record<string, string> = {
   openai: "Open Codex and sign in with your ChatGPT account. The 5-hour and weekly windows are read automatically.",
@@ -19,7 +20,7 @@ export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) =>
   if (!snapshot) return null;
 
   async function browse(appId: string) {
-    const path = await api.chooseExecutable(t("Windows applications"));
+    const path = await api.chooseExecutable(t(byPlatform("Windows applications", "Mac applications")));
     if (!path) return;
     await api.setExecutable(appId, path);
     await refresh();

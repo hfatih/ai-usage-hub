@@ -4,8 +4,10 @@ mod database;
 mod detector;
 mod error;
 mod i18n;
+mod keychain;
 mod models;
 pub mod proxy;
+pub mod platform;
 mod providers;
 mod secret;
 
@@ -298,7 +300,7 @@ fn latest_alert_id(state: &HubState) -> i64 {
         .unwrap_or(0)
 }
 
-/// Raises a Windows toast for each usage alert recorded since `before` (at most three per pass),
+/// Raises a desktop notification for each usage alert recorded since `before` (at most three per pass),
 /// so a low quota is noticed while the window is hidden in the tray.
 fn show_new_alerts(app: &tauri::AppHandle, state: &HubState, before: i64) {
     let Ok(db) = state.database.lock() else { return };
@@ -372,8 +374,10 @@ fn start_monitor(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let log_file = std::env::var_os("LOCALAPPDATA").and_then(|appdata| {
-        let dir = std::path::PathBuf::from(appdata).join("AI Usage Hub");
+    // Before any thread starts: a Finder-launched macOS app has no Homebrew/npm folders on PATH.
+    platform::extend_search_path();
+
+    let log_file = platform::log_dir().and_then(|dir| {
         let _ = fs::create_dir_all(&dir);
         fs::OpenOptions::new().create(true).append(true).open(dir.join("app.log")).ok()
     });
@@ -504,6 +508,13 @@ pub fn run() {
             commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
         ])
-        .run(tauri::generate_context!())
-        .expect("AI Usage Hub failed to start");
+        .build(tauri::generate_context!())
+        .expect("AI Usage Hub failed to start")
+        .run(|_app, _event| {
+            // Clicking the Dock icon while the window is hidden in the menu bar brings it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+                show_main(_app);
+            }
+        });
 }

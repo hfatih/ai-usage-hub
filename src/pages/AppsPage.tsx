@@ -3,13 +3,14 @@ import { api } from "../lib/ipc";
 import { useTranslation } from "../i18n";
 import { formatClock, formatDuration, relativeTime } from "../lib/format";
 import { useHub } from "../stores/hub";
+import { byPlatform } from "../lib/platform";
 
 export function AppsPage() {
   const { t } = useTranslation();
   const { snapshot, refresh } = useHub();
 
   async function browse(appId: string) {
-    const path = await api.chooseExecutable(t("Windows applications"));
+    const path = await api.chooseExecutable(t(byPlatform("Windows applications", "Mac applications")));
     if (!path) return;
     await api.setExecutable(appId, path);
     await refresh();
