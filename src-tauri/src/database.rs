@@ -12,6 +12,9 @@ use crate::{
     },
 };
 
+/// Matches pool accounts that still hold a sign-in token in plain text.
+const PLAIN_TOKEN_FILTER: &str = "(access_token <> '' AND access_token NOT LIKE 'dpapi:%') OR (refresh_token <> '' AND refresh_token NOT LIKE 'dpapi:%') OR (COALESCE(id_token, '') <> '' AND id_token NOT LIKE 'dpapi:%')";
+
 pub struct Database {
     connection: Connection,
     path: Option<PathBuf>,
@@ -165,6 +168,34 @@ impl Database {
             "#,
         )?;
         let _ = self.connection.execute("ALTER TABLE antigravity_accounts ADD COLUMN quota_details_json TEXT;", []);
+        self.encrypt_legacy_tokens()?;
+        // Rows written before 0.1.19 that were never real readings: the image-generation row
+        // copied the Gemini percentage and the credit row held the usage threshold.
+        self.connection.execute(
+            "DELETE FROM usage_snapshots WHERE metric = 'antigravity_image_generation' OR metric LIKE 'google\\_credit\\_%' ESCAPE '\\'",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Rewrites sign-in tokens saved as plain text by versions before 0.1.22 in protected form.
+    fn encrypt_legacy_tokens(&self) -> Result<()> {
+        let legacy: Vec<(String, String, String, Option<String>)> = self
+            .connection
+            .prepare(&format!("SELECT id, access_token, refresh_token, id_token FROM antigravity_accounts WHERE {PLAIN_TOKEN_FILTER}"))?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        for (id, access_token, refresh_token, id_token) in legacy {
+            self.connection.execute(
+                "UPDATE antigravity_accounts SET access_token = ?2, refresh_token = ?3, id_token = ?4 WHERE id = ?1",
+                params![
+                    id,
+                    crate::secret::protect(&access_token),
+                    crate::secret::protect(&refresh_token),
+                    id_token.as_deref().map(crate::secret::protect),
+                ],
+            )?;
+        }
         Ok(())
     }
 
@@ -547,13 +578,24 @@ impl Database {
             .and_then(|path| std::fs::metadata(path).ok())
             .map(|metadata| metadata.len())
             .unwrap_or(0);
+        // The Antigravity pool keeps Google OAuth tokens here; report them instead of claiming none.
+        let stored_secret_count: i64 = self.connection.query_row(
+            "SELECT COALESCE(SUM((access_token <> '') + (refresh_token <> '') + (COALESCE(id_token, '') <> '')), 0) FROM antigravity_accounts",
+            [],
+            |row| row.get(0),
+        )?;
         Ok(SecurityStatus {
             database_path,
             database_size_bytes,
             account_count,
             usage_snapshot_count,
-            stored_secret_count: 0,
-            provider_credentials_stored: false,
+            stored_secret_count,
+            provider_credentials_stored: stored_secret_count > 0,
+            secrets_encrypted: self.connection.query_row(
+                &format!("SELECT COUNT(*) = 0 FROM antigravity_accounts WHERE {PLAIN_TOKEN_FILTER}"),
+                [],
+                |row| row.get(0),
+            )?,
         })
     }
 
@@ -590,9 +632,9 @@ impl Database {
                 id: row.get(0)?,
                 email: row.get(1)?,
                 display_name: row.get(2)?,
-                access_token: row.get(3)?,
-                refresh_token: row.get(4)?,
-                id_token: row.get(5)?,
+                access_token: crate::secret::reveal(&row.get::<_, String>(3)?),
+                refresh_token: crate::secret::reveal(&row.get::<_, String>(4)?),
+                id_token: row.get::<_, Option<String>>(5)?.map(|token| crate::secret::reveal(&token)),
                 project_id: row.get(6)?,
                 expiry_timestamp: row.get(7)?,
                 status: row.get(8)?,
@@ -614,9 +656,9 @@ impl Database {
                 id: row.get(0)?,
                 email: row.get(1)?,
                 display_name: row.get(2)?,
-                access_token: row.get(3)?,
-                refresh_token: row.get(4)?,
-                id_token: row.get(5)?,
+                access_token: crate::secret::reveal(&row.get::<_, String>(3)?),
+                refresh_token: crate::secret::reveal(&row.get::<_, String>(4)?),
+                id_token: row.get::<_, Option<String>>(5)?.map(|token| crate::secret::reveal(&token)),
                 project_id: row.get(6)?,
                 expiry_timestamp: row.get(7)?,
                 status: row.get(8)?,
@@ -656,9 +698,9 @@ impl Database {
                 account.id,
                 account.email,
                 account.display_name,
-                account.access_token,
-                account.refresh_token,
-                account.id_token,
+                crate::secret::protect(&account.access_token),
+                crate::secret::protect(&account.refresh_token),
+                account.id_token.as_deref().map(crate::secret::protect),
                 account.project_id,
                 account.expiry_timestamp,
                 account.status,
@@ -952,6 +994,43 @@ fn seed_applications() -> Vec<ApplicationDefinition> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn pool_tokens_are_encrypted_at_rest_and_legacy_rows_are_upgraded() {
+        let database = Database::memory().unwrap();
+        let account = AntigravityAccount {
+            id: "antigravity:a@example.com".into(),
+            email: "a@example.com".into(),
+            display_name: None,
+            access_token: "access-secret".into(),
+            refresh_token: "refresh-secret".into(),
+            id_token: Some("id-secret".into()),
+            project_id: None,
+            expiry_timestamp: 0,
+            status: "healthy".into(),
+            is_current: false,
+            last_used: 0,
+            quota_remaining_percent: None,
+            quota_details: None,
+        };
+        database.save_antigravity_account(&account).unwrap();
+        let raw: String = database
+            .connection
+            .query_row("SELECT access_token || refresh_token || id_token FROM antigravity_accounts", [], |row| row.get(0))
+            .unwrap();
+        assert!(!raw.contains("secret"), "tokens must not be stored in plain text");
+        let loaded = database.antigravity_account(&account.id).unwrap().unwrap();
+        assert_eq!((loaded.access_token.as_str(), loaded.refresh_token.as_str(), loaded.id_token.as_deref()), ("access-secret", "refresh-secret", Some("id-secret")));
+        assert!(database.security_status().unwrap().secrets_encrypted);
+
+        // A row written by an older version in plain text is upgraded by the migration.
+        database.connection.execute("UPDATE antigravity_accounts SET refresh_token = 'old-plain'", []).unwrap();
+        assert!(!database.security_status().unwrap().secrets_encrypted);
+        database.encrypt_legacy_tokens().unwrap();
+        assert!(database.security_status().unwrap().secrets_encrypted);
+        assert_eq!(database.antigravity_account(&account.id).unwrap().unwrap().refresh_token, "old-plain");
+    }
+
     use super::*;
     use crate::models::{ProviderCapabilities, UsageValue};
 

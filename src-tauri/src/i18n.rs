@@ -30,3 +30,20 @@ pub fn running_tooltip(count: usize, language: &str) -> String {
         format!("AI Usage Hub\n{count} app(s) running")
     }
 }
+
+/// Wording for a desktop toast built from a stored (English) usage alert.
+pub fn alert_text(title: &str, detail: Option<&str>, language: &str) -> (String, String) {
+    let detail = detail.unwrap_or_default();
+    if language != "tr" {
+        return (title.to_owned(), detail.to_owned());
+    }
+    let title = title.replace(" usage alert", " kullanım uyarısı").replace(" refresh failed", " yenilenemedi");
+    let detail = if let Some((label, rest)) = detail.split_once(" reset to ") {
+        format!("{label} sıfırlandı; kalan %{}", rest.trim_end_matches("% remaining"))
+    } else if let Some((label, rest)) = detail.split_once(" has ") {
+        format!("{label} için kalan %{}", rest.trim_end_matches("% remaining"))
+    } else {
+        detail.to_owned()
+    };
+    (title, detail)
+}

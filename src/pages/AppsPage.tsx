@@ -1,4 +1,4 @@
-import { ExternalLink, FolderSearch, MonitorDot, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderSearch, MonitorDot } from "lucide-react";
 import { api } from "../lib/ipc";
 import { useTranslation } from "../i18n";
 import { formatClock, formatDuration, relativeTime } from "../lib/format";
@@ -17,7 +17,7 @@ export function AppsPage() {
 
   return (
     <section>
-      <div className="page-heading"><div><span className="eyebrow">{t("Local applications")}</span><h1>{t("Apps")}</h1><p>{t("Process detection tracks application-open time, never token consumption.")}</p></div><button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={16} />{t("Scan now")}</button></div>
+      <div className="page-heading"><div><span className="eyebrow">{t("Local applications")}</span><h1>{t("Apps")}</h1><p>{t("Process detection tracks application-open time, never token consumption.")}</p></div></div>
       <div className="apps-table glass-panel">
         <div className="apps-table-head"><span>{t("Application")}</span><span>{t("Status")}</span><span>{t("Today")}</span><span>{t("Last used")}</span><span>{t("Executable")}</span><span /></div>
         {snapshot?.applications.map((app) => (

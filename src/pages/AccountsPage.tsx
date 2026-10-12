@@ -60,6 +60,17 @@ export function AccountsPage() {
   const [scanning, setScanning] = useState(false);
   const [syncingSession, setSyncingSession] = useState(false);
   const [batchBanner, setBatchBanner] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggleSelected(id: string) {
+    setSelected(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
+  }
+
+  async function removeSelected() {
+    if (!window.confirm(t("Delete {count} selected accounts from the Antigravity account pool?", { count: selected.length }))) return;
+    for (const id of selected) await deleteAntigravityAccount(id);
+    setSelected([]);
+  }
 
   // Add Account Modal (Manual Refresh Token or Code)
   const [showAddModal, setShowAddModal] = useState(false);
@@ -320,16 +331,6 @@ export function AccountsPage() {
             {t("Capture from IDE")}
           </button>
 
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void refresh()}
-            disabled={refreshing}
-            title={t("Refresh pool quotas")}
-          >
-            <RefreshCw className={refreshing ? "spin" : ""} size={14} />
-            {t("Refresh")}
-          </button>
 
           <button
             type="button"
@@ -374,16 +375,16 @@ export function AccountsPage() {
       </div>
 
       {oauthBanner && (
-        <div className="glass-panel" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, background: "rgba(56, 189, 248, 0.1)", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
-          <RefreshCw className="spin" size={16} style={{ color: "#38bdf8" }} />
-          <span style={{ fontSize: 13, color: "#e0f2fe" }}>{oauthBanner}</span>
+        <div className="glass-panel" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, background: "rgba(240, 171, 197, 0.1)", border: "1px solid rgba(240, 171, 197, 0.3)" }}>
+          <RefreshCw className="spin" size={16} style={{ color: "#f0abc5" }} />
+          <span style={{ fontSize: 13, color: "#ffe6ef" }}>{oauthBanner}</span>
         </div>
       )}
 
       {batchBanner && (
-        <div className="glass-panel" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
-          <Check size={16} style={{ color: "#10b981" }} />
-          <span style={{ fontSize: 13, color: "#d1fae5" }}>{batchBanner}</span>
+        <div className="glass-panel" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, background: "rgba(219, 168, 194, 0.15)", border: "1px solid rgba(219, 168, 194, 0.3)" }}>
+          <Check size={16} style={{ color: "#dba8c2" }} />
+          <span style={{ fontSize: 13, color: "#ffe6ef" }}>{batchBanner}</span>
         </div>
       )}
 
@@ -481,6 +482,22 @@ export function AccountsPage() {
               {refreshingAll ? t("Refreshing quotas...") : t("Refresh all quotas")}
             </button>
 
+            {selected.length > 0 ? (
+              <>
+                <button type="button" className="danger-button" style={{ height: 32 }} onClick={() => void removeSelected()}>
+                  <Trash2 size={13} />
+                  {t("Delete selected ({count})", { count: selected.length })}
+                </button>
+                <button type="button" className="secondary-button" style={{ height: 32, fontSize: 12, padding: "4px 10px" }} onClick={() => setSelected([])}>
+                  {t("Clear selection")}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="secondary-button" style={{ height: 32, fontSize: 12, padding: "4px 10px" }} onClick={() => setSelected(displayedAccounts.map((account) => account.id))}>
+                {t("Select all")}
+              </button>
+            )}
+
             <button
               type="button"
               className="secondary-button"
@@ -509,6 +526,7 @@ export function AccountsPage() {
             return (
               <article className={`glass-panel account-card ${account.isCurrent ? "is-current-pool-card" : ""}`} key={account.id}>
                 <header>
+                  <input type="checkbox" className="select-box" checked={selected.includes(account.id)} onChange={() => toggleSelected(account.id)} aria-label={t("Select {email}", { email: account.email })} />
                   <span className="provider-logo provider-logo--google">G</span>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -523,7 +541,7 @@ export function AccountsPage() {
                     <span>{account.displayName || t("Google account")}</span>
                   </div>
                   {account.isCurrent ? (
-                    <span className="connection-pill connection-pill--connected" style={{ background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#34d399", fontWeight: 700 }}>
+                    <span className="connection-pill connection-pill--connected" style={{ background: "rgba(219, 168, 194, 0.15)", border: "1px solid rgba(219, 168, 194, 0.4)", color: "#ffffff", fontWeight: 700 }}>
                       <Check size={12} /> {t("Verified IDE Session")}
                     </span>
                   ) : (
@@ -590,13 +608,21 @@ export function AccountsPage() {
                             </span>
                           )}
                         </div>
-                        <div className="model-quota-chip">
+                        <div
+                          className="model-quota-chip"
+                          title={account.quotaDetails.geminiWeeklyResetAt ? resetTime(account.quotaDetails.geminiWeeklyResetAt) : undefined}
+                        >
                           <div className="model-quota-chip-header">
                             <span className="model-quota-label">Gemini W</span>
                             <strong className="model-quota-val">
                               {account.quotaDetails.geminiWeekly != null ? `${Math.round(account.quotaDetails.geminiWeekly)}%` : "—"}
                             </strong>
                           </div>
+                          {account.quotaDetails.geminiWeeklyResetAt && account.quotaDetails.geminiWeekly != null && account.quotaDetails.geminiWeekly < 100 && (
+                            <span className="model-quota-reset">
+                              🕒 {shortResetTime(account.quotaDetails.geminiWeeklyResetAt)}
+                            </span>
+                          )}
                         </div>
                         <div
                           className="model-quota-chip"
@@ -614,7 +640,10 @@ export function AccountsPage() {
                             </span>
                           )}
                         </div>
-                        <div className="model-quota-chip">
+                        <div
+                          className="model-quota-chip"
+                          title={account.quotaDetails.claudeWeeklyResetAt ? resetTime(account.quotaDetails.claudeWeeklyResetAt) : undefined}
+                        >
                           <div className="model-quota-chip-header">
                             <span className="model-quota-label">Claude W</span>
                             <strong className="model-quota-val">
@@ -625,6 +654,11 @@ export function AccountsPage() {
                                 : "—"}
                             </strong>
                           </div>
+                          {account.quotaDetails.claudeWeeklyResetAt && account.quotaDetails.claudeWeekly != null && account.quotaDetails.claudeWeekly < 100 && (
+                            <span className="model-quota-reset">
+                              🕒 {shortResetTime(account.quotaDetails.claudeWeeklyResetAt)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )}
@@ -670,6 +704,7 @@ export function AccountsPage() {
                   <tr key={account.id} className={account.isCurrent ? "is-current-row" : ""}>
                     <td>
                       <div className="table-account-cell">
+                        <input type="checkbox" className="select-box" checked={selected.includes(account.id)} onChange={() => toggleSelected(account.id)} aria-label={t("Select {email}", { email: account.email })} />
                         <span className="provider-logo provider-logo--google">G</span>
                         <div>
                           <strong>{account.email}</strong>
@@ -684,7 +719,7 @@ export function AccountsPage() {
                     </td>
                     <td>
                       {account.isCurrent ? (
-                        <span className="connection-pill connection-pill--connected" style={{ background: "rgba(16, 185, 129, 0.15)", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#34d399", fontWeight: 700 }}>
+                        <span className="connection-pill connection-pill--connected" style={{ background: "rgba(219, 168, 194, 0.15)", border: "1px solid rgba(219, 168, 194, 0.4)", color: "#ffffff", fontWeight: 700 }}>
                           <Check size={11} /> {t("Verified IDE Session")}
                         </span>
                       ) : account.status === "forbidden" ? (

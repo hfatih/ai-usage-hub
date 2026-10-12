@@ -6,7 +6,11 @@ import {
   Clock3,
   Copy,
   Cpu,
+  Eye,
+  EyeOff,
   Flame,
+  KeyRound,
+  Plus,
   Radio,
   RefreshCw,
   Send,
@@ -22,11 +26,25 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/ipc";
 import { useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
-import type { ProxyStatus } from "../types";
+import type { ModelMapRule, ProxyModel, ProxyStatus } from "../types";
 
 export function ProxyPage() {
   const { t } = useTranslation();
-  const { antigravityAccounts } = useHub();
+  const { antigravityAccounts, settings, saveSettings } = useHub();
+  const [showKey, setShowKey] = useState(false);
+  const [rules, setRules] = useState<ModelMapRule[]>(settings?.proxyModelMap ?? []);
+  useEffect(() => setRules(settings?.proxyModelMap ?? []), [settings]);
+  const keyRequired = settings?.proxyRequireKey !== false;
+  const apiKey = (keyRequired && settings?.proxyApiKey) || "antigravity";
+
+  async function regenerateKey() {
+    if (!window.confirm(t("Create a new key? Tools using the old key stop working until you update them."))) return;
+    useHub.setState({ settings: await api.regenerateProxyApiKey() });
+  }
+
+  function updateRule(index: number, change: Partial<ModelMapRule>) {
+    setRules(rules.map((rule, position) => (position === index ? { ...rule, ...change } : rule)));
+  }
 
   const [status, setStatus] = useState<ProxyStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +56,7 @@ export function ProxyPage() {
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<{ text: string; latencyMs: number } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [liveModels, setLiveModels] = useState<ProxyModel[]>([]);
 
   // CLI snippet tab
   const [cliTab, setCliTab] = useState<"bash" | "powershell">("bash");
@@ -45,6 +64,7 @@ export function ProxyPage() {
 
   useEffect(() => {
     void fetchStatus();
+    api.proxyModels().then(setLiveModels).catch(() => {});
     const timer = setInterval(() => void fetchStatus(), 5000);
     return () => clearInterval(timer);
   }, []);
@@ -89,11 +109,11 @@ export function ProxyPage() {
   const successRate = total > 0 ? Math.round((success / total) * 100) : 100;
   const activeEmail = status?.activeAccountEmail || antigravityAccounts.find((a) => a.isCurrent)?.email || antigravityAccounts[0]?.email;
 
-  const claudeBashSnippet = `export ANTHROPIC_BASE_URL="${baseUrl}"\nexport ANTHROPIC_API_KEY="antigravity"\nclaude`;
-  const claudePsSnippet = `$env:ANTHROPIC_BASE_URL="${baseUrl}"\n$env:ANTHROPIC_API_KEY="antigravity"\nclaude`;
+  const claudeBashSnippet = `export ANTHROPIC_BASE_URL="${baseUrl}"\nexport ANTHROPIC_API_KEY="${apiKey}"\nclaude`;
+  const claudePsSnippet = `$env:ANTHROPIC_BASE_URL="${baseUrl}"\n$env:ANTHROPIC_API_KEY="${apiKey}"\nclaude`;
 
-  const aiderBashSnippet = `export OPENAI_API_BASE="${baseUrl}/v1"\nexport OPENAI_API_KEY="sk-antigravity"\naider --model openai/claude-3-7-sonnet`;
-  const aiderPsSnippet = `$env:OPENAI_API_BASE="${baseUrl}/v1"\n$env:OPENAI_API_KEY="sk-antigravity"\naider --model openai/claude-3-7-sonnet`;
+  const aiderBashSnippet = `export OPENAI_API_BASE="${baseUrl}/v1"\nexport OPENAI_API_KEY="${apiKey}"\naider --model openai/claude-3-7-sonnet`;
+  const aiderPsSnippet = `$env:OPENAI_API_BASE="${baseUrl}/v1"\n$env:OPENAI_API_KEY="${apiKey}"\naider --model openai/claude-3-7-sonnet`;
 
   const continueSnippet = JSON.stringify(
     {
@@ -103,7 +123,7 @@ export function ProxyPage() {
           provider: "openai",
           model: "claude-3-7-sonnet",
           apiBase: `${baseUrl}/v1`,
-          apiKey: "sk-antigravity",
+          apiKey,
         },
       ],
     },
@@ -115,7 +135,7 @@ export function ProxyPage() {
     {
       "cline.apiProvider": "openai-native",
       "cline.openAiBaseUrl": `${baseUrl}/v1`,
-      "cline.openAiApiKey": "sk-antigravity",
+      "cline.openAiApiKey": apiKey,
       "cline.openAiModelId": "claude-3-7-sonnet",
     },
     null,
@@ -181,6 +201,81 @@ export function ProxyPage() {
         </div>
       </div>
 
+      {/* ACCESS KEY & MODEL RULES */}
+      <div className="settings-panel glass-panel" style={{ marginBottom: 28 }}>
+        <div className="settings-section">
+          <div>
+            <KeyRound size={19} />
+            <span>
+              <strong>{t("API key")}</strong>
+              <small>{t("Tools must send this key. Without it, any program on this PC could spend your accounts' quota.")}</small>
+            </span>
+          </div>
+          <div className="proxy-key-row">
+            <code>{showKey ? settings?.proxyApiKey : "•".repeat(24)}</code>
+            <button type="button" className="icon-button" onClick={() => setShowKey(!showKey)} title={t(showKey ? "Hide key" : "Show key")}>
+              {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+            <button type="button" className="icon-button" onClick={() => void copyText("proxy-key", settings?.proxyApiKey ?? "")} title={t("Copy key")}>
+              {copiedKey === "proxy-key" ? <Check size={14} /> : <Copy size={14} />}
+            </button>
+            <button type="button" className="secondary-button" onClick={() => void regenerateKey()}>
+              <RefreshCw size={13} />
+              {t("New key")}
+            </button>
+          </div>
+        </div>
+        <div className="settings-section">
+          <div>
+            <span>
+              <strong>{t("Require the key")}</strong>
+              <small>{t("Turn off only for a tool that cannot send a key.")}</small>
+            </span>
+          </div>
+          <label className="switch">
+            <input type="checkbox" checked={keyRequired} onChange={(event) => settings && void saveSettings({ ...settings, proxyRequireKey: event.target.checked })} />
+            <span />
+          </label>
+        </div>
+        <div className="settings-section proxy-rules">
+          <div>
+            <span>
+              <strong>{t("Model rules")}</strong>
+              <small>{t("Send a model name your tool asks for to the model you choose. End a name with * to match everything that starts with it.")}</small>
+            </span>
+          </div>
+          <div className="proxy-rule-list">
+            {rules.map((rule, index) => (
+              <div className="proxy-rule" key={index}>
+                <input className="search-input" value={rule.from} placeholder="gpt-4*" onChange={(event) => updateRule(index, { from: event.target.value })} />
+                <span>→</span>
+                {liveModels.length > 0 ? (
+                  <select value={rule.to} onChange={(event) => updateRule(index, { to: event.target.value })}>
+                    <option value="">{t("Choose a model")}</option>
+                    {!liveModels.some((model) => model.id === rule.to) && rule.to && <option value={rule.to}>{rule.to}</option>}
+                    {liveModels.map((model) => <option key={model.id} value={model.id}>{model.displayName ?? model.id}</option>)}
+                  </select>
+                ) : (
+                  <input className="search-input" value={rule.to} placeholder="gemini-3.6-flash-high" onChange={(event) => updateRule(index, { to: event.target.value })} />
+                )}
+                <button type="button" className="icon-button" onClick={() => setRules(rules.filter((_, position) => position !== index))} title={t("Delete")}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <div className="proxy-rule-actions">
+              <button type="button" className="secondary-button" onClick={() => setRules([...rules, { from: "", to: "" }])}>
+                <Plus size={13} />
+                {t("Add rule")}
+              </button>
+              <button type="button" className="primary-button" onClick={() => settings && void saveSettings({ ...settings, proxyModelMap: rules })}>
+                {t("Save rules")}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* CLIENT CONFIGURATIONS GRID */}
       <div className="section-heading">
         <div>
@@ -200,20 +295,18 @@ export function ProxyPage() {
               <span>{t("Chain-of-thought & Silent haiku downgrade")}</span>
             </div>
           </header>
-          <div style={{ display: "flex", gap: 8, margin: "12px 0 6px" }}>
+          <div className="segment-group">
             <button
               type="button"
-              className={`view-mode-btn ${cliTab === "bash" ? "is-active" : ""}`}
+              className={`segment-btn ${cliTab === "bash" ? "is-active" : ""}`}
               onClick={() => setCliTab("bash")}
-              style={{ padding: "3px 10px", fontSize: 12 }}
             >
               Bash / Zsh
             </button>
             <button
               type="button"
-              className={`view-mode-btn ${cliTab === "powershell" ? "is-active" : ""}`}
+              className={`segment-btn ${cliTab === "powershell" ? "is-active" : ""}`}
               onClick={() => setCliTab("powershell")}
-              style={{ padding: "3px 10px", fontSize: 12 }}
             >
               PowerShell
             </button>
@@ -240,7 +333,7 @@ export function ProxyPage() {
               onClick={() => void copyText("claude", cliTab === "bash" ? claudeBashSnippet : claudePsSnippet)}
               title={t("Copy configuration")}
             >
-              {copiedKey === "claude" ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+              {copiedKey === "claude" ? <Check size={14} color="#dba8c2" /> : <Copy size={14} />}
             </button>
           </div>
           <p className="integration-setup" style={{ fontSize: 12, marginTop: 8 }}>
@@ -259,7 +352,7 @@ export function ProxyPage() {
               <span>/v1/chat/completions</span>
             </div>
           </header>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "14px 0" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "14px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
               <span style={{ color: "var(--muted)" }}>Base URL:</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -270,21 +363,21 @@ export function ProxyPage() {
                   style={{ padding: 4 }}
                   onClick={() => void copyText("openai-url", `${baseUrl}/v1`)}
                 >
-                  {copiedKey === "openai-url" ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                  {copiedKey === "openai-url" ? <Check size={12} color="#dba8c2" /> : <Copy size={12} />}
                 </button>
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
               <span style={{ color: "var(--muted)" }}>API Key:</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <code style={{ background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>sk-antigravity</code>
+                <code style={{ background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>{apiKey}</code>
                 <button
                   type="button"
                   className="icon-button"
                   style={{ padding: 4 }}
-                  onClick={() => void copyText("openai-key", "sk-antigravity")}
+                  onClick={() => void copyText("openai-key", apiKey)}
                 >
-                  {copiedKey === "openai-key" ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                  {copiedKey === "openai-key" ? <Check size={12} color="#dba8c2" /> : <Copy size={12} />}
                 </button>
               </div>
             </div>
@@ -309,20 +402,18 @@ export function ProxyPage() {
               <span>openai/claude-3-7-sonnet</span>
             </div>
           </header>
-          <div style={{ display: "flex", gap: 8, margin: "12px 0 6px" }}>
+          <div className="segment-group">
             <button
               type="button"
-              className={`view-mode-btn ${aiderTab === "bash" ? "is-active" : ""}`}
+              className={`segment-btn ${aiderTab === "bash" ? "is-active" : ""}`}
               onClick={() => setAiderTab("bash")}
-              style={{ padding: "3px 10px", fontSize: 12 }}
             >
               Bash / Zsh
             </button>
             <button
               type="button"
-              className={`view-mode-btn ${aiderTab === "powershell" ? "is-active" : ""}`}
+              className={`segment-btn ${aiderTab === "powershell" ? "is-active" : ""}`}
               onClick={() => setAiderTab("powershell")}
-              style={{ padding: "3px 10px", fontSize: 12 }}
             >
               PowerShell
             </button>
@@ -349,7 +440,7 @@ export function ProxyPage() {
               onClick={() => void copyText("aider", aiderTab === "bash" ? aiderBashSnippet : aiderPsSnippet)}
               title={t("Copy configuration")}
             >
-              {copiedKey === "aider" ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+              {copiedKey === "aider" ? <Check size={14} color="#dba8c2" /> : <Copy size={14} />}
             </button>
           </div>
           <p className="integration-setup" style={{ fontSize: 12, marginTop: 8 }}>
@@ -368,7 +459,7 @@ export function ProxyPage() {
               <span>VS Code & JetBrains</span>
             </div>
           </header>
-          <div style={{ position: "relative", margin: "14px 0 6px" }}>
+          <div style={{ position: "relative", margin: "14px 18px 6px" }}>
             <pre
               style={{
                 background: "rgba(0,0,0,0.35)",
@@ -391,7 +482,7 @@ export function ProxyPage() {
               onClick={() => void copyText("continue", continueSnippet)}
               title={t("Copy configuration")}
             >
-              {copiedKey === "continue" ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+              {copiedKey === "continue" ? <Check size={14} color="#dba8c2" /> : <Copy size={14} />}
             </button>
           </div>
           <p className="integration-setup" style={{ fontSize: 12 }}>
@@ -410,7 +501,7 @@ export function ProxyPage() {
               <span>VS Code settings.json</span>
             </div>
           </header>
-          <div style={{ position: "relative", margin: "14px 0 6px" }}>
+          <div style={{ position: "relative", margin: "14px 18px 6px" }}>
             <pre
               style={{
                 background: "rgba(0,0,0,0.35)",
@@ -433,7 +524,7 @@ export function ProxyPage() {
               onClick={() => void copyText("cline", clineSnippet)}
               title={t("Copy configuration")}
             >
-              {copiedKey === "cline" ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+              {copiedKey === "cline" ? <Check size={14} color="#dba8c2" /> : <Copy size={14} />}
             </button>
           </div>
           <p className="integration-setup" style={{ fontSize: 12 }}>
@@ -452,7 +543,7 @@ export function ProxyPage() {
               <span>/v1beta/models</span>
             </div>
           </header>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "14px 0" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "14px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
               <span style={{ color: "var(--muted)" }}>Base URL:</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -463,7 +554,7 @@ export function ProxyPage() {
                   style={{ padding: 4 }}
                   onClick={() => void copyText("gemini-url", `${baseUrl}/v1beta`)}
                 >
-                  {copiedKey === "gemini-url" ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                  {copiedKey === "gemini-url" ? <Check size={12} color="#dba8c2" /> : <Copy size={12} />}
                 </button>
               </div>
             </div>
@@ -494,13 +585,24 @@ export function ProxyPage() {
             onChange={(e) => setTestModel(e.target.value)}
             style={{ width: "auto", minWidth: 200 }}
           >
-            <option value="gemini-2.5-flash">gemini-2.5-flash (Fastest)</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro (High reasoning)</option>
-            <option value="claude-3-7-sonnet">claude-3-7-sonnet (Claude)</option>
-            <option value="gpt-4o">gpt-4o (OpenAI)</option>
+            {liveModels.length > 0 ? (
+              liveModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.displayName ?? model.id}
+                  {model.remainingPercent != null ? ` · ${Math.round(model.remainingPercent)}%` : ""}
+                </option>
+              ))
+            ) : (
+              <>
+                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                <option value="claude-3-7-sonnet">claude-3-7-sonnet</option>
+                <option value="gpt-4o">gpt-4o</option>
+              </>
+            )}
           </select>
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {t("Routes to")}: <code style={{ color: "var(--brand)" }}>{testModel.includes("claude") ? "claude-sonnet-4-6" : testModel.includes("pro") ? "gemini-pro-agent" : "gemini-3.6-flash-high"}</code>
+            {t("Routes to")}: <code style={{ color: "var(--brand)" }}>{liveModels.some((model) => model.id === testModel) ? testModel : testModel.includes("claude") ? "claude-sonnet-5-5-medium" : testModel.includes("gpt") ? "gpt-oss-120b-medium" : testModel.includes("pro") ? "gemini-pro-agent" : "gemini-3.6-flash-high"}</code>
           </span>
         </div>
 
@@ -545,7 +647,7 @@ export function ProxyPage() {
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, fontSize: 12 }}>
-              <span style={{ color: "#10b981", display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ color: "#dba8c2", display: "flex", alignItems: "center", gap: 4 }}>
                 <CheckCircle2 size={13} /> 200 OK
               </span>
               <span style={{ color: "var(--muted)" }}>
@@ -617,13 +719,13 @@ export function ProxyPage() {
                               log.clientProtocol === "anthropic"
                                 ? "rgba(217, 119, 6, 0.15)"
                                 : log.clientProtocol === "openai"
-                                ? "rgba(16, 185, 129, 0.15)"
+                                ? "rgba(219, 168, 194, 0.15)"
                                 : "rgba(59, 130, 246, 0.15)",
                             color:
                               log.clientProtocol === "anthropic"
                                 ? "#f59e0b"
                                 : log.clientProtocol === "openai"
-                                ? "#10b981"
+                                ? "#dba8c2"
                                 : "#60a5fa",
                             border: "none",
                           }}
@@ -642,8 +744,8 @@ export function ProxyPage() {
                               className="status-chip"
                               style={{
                                 fontSize: 10,
-                                background: "rgba(16, 185, 129, 0.2)",
-                                color: "#10b981",
+                                background: "rgba(219, 168, 194, 0.2)",
+                                color: "#dba8c2",
                                 border: "none",
                                 padding: "1px 6px",
                               }}
