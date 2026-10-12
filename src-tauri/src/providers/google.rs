@@ -273,7 +273,7 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         .unwrap_or(0);
 
     if now >= expiry_ts - 60 && !details.refresh_token.is_empty() {
-        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token) {
+        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token, None) {
             access_token = token_resp.access_token.clone();
             details.access_token = token_resp.access_token;
             if let Some(ref rt) = token_resp.refresh_token {
@@ -292,16 +292,16 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         }
     }
 
-    let mut usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref());
+    let mut usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
     if usage.is_empty() && !details.refresh_token.is_empty() {
-        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token) {
+        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token, None) {
             access_token = token_resp.access_token.clone();
             details.access_token = token_resp.access_token;
             let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
                 token: details.clone(),
                 auth_method: cred.auth_method.clone(),
             });
-            usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref());
+            usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
         }
     }
 

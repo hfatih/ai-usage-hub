@@ -75,6 +75,11 @@ Screenshots use the app's built-in preview data.
 - **Claude Desktop / Claude Code:** shared 5-hour and weekly quota and local token totals.
 - **Google Antigravity:** Gemini and Claude/GPT quota windows, the Google One AI credit balance, and Antigravity's prompt and flow credits.
 - **OpenCode:** connected providers, the free model catalog and local token and cost totals.
+- **Gemini CLI:** remaining quota per model, read with the CLI's own Google sign-in.
+- **GitHub Copilot:** chat, completion and premium request quotas, read with the editor plugin's sign-in.
+- **Cursor:** included and on-demand usage for the billing cycle, read with Cursor's own session (written from the endpoint's known shape; not yet tested against a live Cursor install).
+- **DeepSeek, Kimi / Moonshot, Grok / xAI:** paste an API key on the Integrations page. DeepSeek and Kimi show the account balance; xAI reports no balance for a regular key, so Grok shows only whether the key works.
+- Cards and accounts are grouped by provider, Google first.
 - Every value is labeled *Official*, *Local*, *Calculated* or *Unavailable*. The app does not show a number it could not read.
 - Local alerts when a quota drops below your thresholds, with optional Windows notifications.
 - Tracks how long each AI app has been open today and this week.
@@ -86,19 +91,25 @@ Screenshots use the app's built-in preview data.
 - **Account switching:** writes the chosen account's sign-in to Windows Credential Manager and restarts Antigravity's language server. The hub then checks which account the IDE reports; if it is still the old one, it restores the previous sign-in and tells you.
 - **Auto-switch:** moves to another healthy account when the current one falls below your threshold or gets rate limited.
 - **Add accounts** with Google sign-in in the browser, by capturing the account currently signed in to the IDE, or by importing JSON.
-- **Batch delete**, search, sort, grid and list views, JSON export and import.
+- **Batch delete**, search, sort (including by Gemini or Claude/GPT quota), grid and list views, JSON export and import.
+- **Plan-aware:** shows each account's plan and can prefer Ultra accounts before Pro before Free.
+- **Per-account proxy:** route one account's Google traffic through its own HTTP or SOCKS5 proxy. If that proxy is down the request fails instead of going out directly.
+- **Close or force-close** the Antigravity IDE from the app.
 
 ### Local API proxy (`http://127.0.0.1:8046`)
 
 - **Three API formats:** OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`) and Gemini (`/v1beta/models/...:generateContent`).
-- **Image generation:** OpenAI Images format (`/v1/images/generations`), returned as `b64_json`.
+- **Image generation:** OpenAI Images format (`/v1/images/generations`) with `size`, `quality`, `imageSize`, `n` (1-10) and `response_format` (`b64_json` or `url`). A model suffix such as `-16-9-4k` sets ratio and resolution too.
 - **Live model list:** `/v1/models` and the test panel show the models your account can actually call, read from Google. Real model ids pass through unchanged; familiar names such as `claude-3-7-sonnet` or `gpt-4o` are mapped to the current equivalent.
-- **Model rules:** send any model name a tool asks for to a model you choose (`gpt-4*` → a Gemini model, for example).
+- **Model rules:** send any model name a tool asks for to a model you choose (`gpt-4*` → a Gemini model, for example). A rule starting with `re:` is a regular expression.
 - **API key:** the proxy rejects requests without the key shown in the app. It listens on `127.0.0.1` only.
-- **Failover:** on a 429 or 403 the proxy marks the account and retries with the next healthy one.
-- **Haiku downgrade:** requests for Haiku-class models (background tasks such as title generation in Claude Code) go to a Flash model to save Claude quota.
+- **Failover:** on a 429 or 403 the proxy marks the account and retries with the next healthy one. This rotation is the proxy's own; it does not switch the account open in the IDE.
+- **Background downgrade:** Haiku-class requests, and conversation-title or next-prompt-suggestion requests whatever model they name, go to a Flash model to save Claude quota. Can be turned off.
+- **Port and timeout** are configurable; a new port applies after a restart.
+- **One-click connect** for Claude Code and OpenCode: writes the proxy address and key into the tool's own config file, keeps a `.hub-backup` copy and can remove its entries again.
+- **Risk notice:** the proxy answers 403 until you accept the notice below in the app.
 
-Limits worth knowing: streaming responses are delivered as a single chunk rather than token by token, and one image is generated per request.
+Limits worth knowing: streaming responses are delivered as a single chunk rather than token by token, and `n` images cost `n` upstream requests.
 
 > [!WARNING]
 > Using pooled Google accounts through a local proxy may violate Google's Terms of Service and could get an account suspended. The usage dashboard does not need the proxy; use the proxy at your own risk.
@@ -214,6 +225,7 @@ cargo test --locked
 - **No passwords:** the app never asks for or stores a Google, OpenAI or Anthropic password.
 - **Sign-in tokens:** Codex and Claude keep their own credentials; the hub stores only labels and usage for them. For Antigravity pool accounts it stores Google OAuth tokens, encrypted with Windows DPAPI for your Windows user. A copied database cannot be read under another Windows user.
 - **Exports:** an exported account JSON contains the tokens in plain text. Treat it like a password.
+- **API keys and account proxies:** provider API keys you paste and per-account proxy addresses are stored the same way, encrypted with DPAPI, and a key is sent only to its own provider.
 - **Proxy:** listens on `127.0.0.1` only and requires the API key unless you turn that off.
 - **No telemetry:** the app talks only to the providers' own endpoints.
 - The **Security** page in the app shows what is stored and lets you clear usage history. To report a vulnerability, see [SECURITY.md](SECURITY.md).

@@ -2,9 +2,8 @@ import { ArrowUpRight, CircleAlert, Clock3, ExternalLink, ShieldCheck } from "lu
 import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
 import { formatClock, formatDuration, formatUsageValue, relativeTime, sourceLabel, usageProgress, usageTiming } from "../lib/format";
+import { PROVIDER_INITIALS } from "../lib/providers";
 import type { AppStatus, ProviderSummary } from "../types";
-
-const accentNames: Record<string, string> = { openai: "O", anthropic: "A", google: "G", opencode: "OC", kimi: "K", github: "GH" };
 
 export function ProviderCard({ provider, apps }: { provider: ProviderSummary; apps: AppStatus[] }) {
   const { language, t } = useTranslation();
@@ -22,7 +21,7 @@ export function ProviderCard({ provider, apps }: { provider: ProviderSummary; ap
     <article className={`provider-card provider-card--${provider.id}`}>
       <div className="card-head">
         <div className="provider-identity">
-          <span className={`provider-logo provider-logo--${provider.id}`}>{accentNames[provider.id] ?? provider.name.slice(0, 1)}</span>
+          <span className={`provider-logo provider-logo--${provider.id}`}>{PROVIDER_INITIALS[provider.id] ?? provider.name.slice(0, 1)}</span>
           <div><span className="provider-name">{provider.name}</span><strong className="account-email">{localizeValue(provider.accountLabel, language)}</strong>{provider.plan && <small className="plan-label">{localizeValue(provider.plan, language)}</small>}</div>
         </div>
         <span className={`connection-pill connection-pill--${provider.usageAllowed === false ? "limited" : provider.connectionStatus}`}>{t(statusLabel)}</span>
@@ -38,7 +37,7 @@ export function ProviderCard({ provider, apps }: { provider: ProviderSummary; ap
             {percentage != null && <div className="usage-track"><span style={{ width: `${percentage}%` }} /></div>}
             <div className="usage-reset"><Clock3 size={11} />{usageTiming(item)}</div>
           </div>;
-        })}</div> : <div className="unavailable-value">{t("Unavailable")} <small>{provider.error ? localizeValue(provider.error, language) : t(provider.id === "openai" ? "Open Codex and sign in to read subscription usage" : provider.id === "anthropic" ? "Open Claude Desktop and sign in to refresh the shared Desktop / Code quota." : "No supported usage source connected")}</small></div>}
+        })}</div> : <div className="unavailable-value">{t("Unavailable")} <small>{provider.error ? localizeValue(provider.error, language) : t(provider.id === "openai" ? "Open Codex and sign in to read subscription usage" : provider.id === "anthropic" ? "Open Claude Desktop and sign in to refresh the shared Desktop / Code quota." : provider.id === "grok" && provider.connectionStatus === "connected" ? "Key accepted. xAI reports no balance for a regular API key." : ["kimi", "grok", "deepseek"].includes(provider.id) ? "Add an API key in Integrations to connect" : "No supported usage source connected")}</small></div>}
       </div>
 
       <div className="app-state-row">

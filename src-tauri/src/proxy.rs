@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -13,6 +13,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::antigravity;
 use crate::models::{AntigravityAccount, ModelMapRule};
+use crate::routing::{self, mapped_model};
 use crate::HubState;
 
 static PROXY_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -43,6 +44,55 @@ pub struct ProxyModel {
 }
 
 static MODEL_MAP: LazyLock<Mutex<Vec<ModelMapRule>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static UPSTREAM_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(90);
+static BACKGROUND_DOWNGRADE: AtomicBool = AtomicBool::new(true);
+static ACCOUNT_CLIENTS: LazyLock<Mutex<HashMap<String, Client>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Applies the proxy options that can change while the app runs: how long to wait for an
+/// upstream answer (clamped to 10-600 seconds) and whether housekeeping requests are sent to a
+/// Flash model. Called at startup and whenever settings are saved.
+pub fn set_proxy_options(timeout_seconds: u64, background_downgrade: bool) {
+    UPSTREAM_TIMEOUT_SECS.store(timeout_seconds.clamp(10, 600), Ordering::Relaxed);
+    BACKGROUND_DOWNGRADE.store(background_downgrade, Ordering::Relaxed);
+}
+
+/// The client an account's upstream calls go through: the shared one, or a cached client bound
+/// to the account's own proxy. A proxy that cannot be set up is an error, never a direct call.
+fn upstream_client(account: &AntigravityAccount) -> Result<Client, String> {
+    let Some(url) = account.proxy_url.as_deref().map(str::trim).filter(|url| !url.is_empty()) else {
+        return Ok(PROXY_HTTP_CLIENT.clone());
+    };
+    let mut clients = ACCOUNT_CLIENTS.lock().map_err(|_| "proxy client cache is unavailable".to_string())?;
+    if let Some(client) = clients.get(url) {
+        return Ok(client.clone());
+    }
+    let client = antigravity::http_client(Some(url), Duration::from_secs(600)).map_err(|error| error.to_string())?;
+    clients.insert(url.to_owned(), client.clone());
+    Ok(client)
+}
+
+/// Cheapest text model in the catalog, used for housekeeping requests.
+fn background_model(catalog: &[ProxyModel]) -> String {
+    let mut ids: Vec<&str> = catalog.iter().map(|model| model.id.as_str()).filter(|id| id.contains("flash") && !id.contains("image")).collect();
+    ids.sort_unstable();
+    ids.last().map_or_else(|| "gemini-3.6-flash-high".to_owned(), |id| id.to_string())
+}
+
+/// Upstream model for a chat request: a Flash model when the request is a housekeeping task and
+/// the user left that saving on, otherwise the normal rule and alias mapping.
+fn chat_upstream_model(requested_model: &str, gemini_payload: &Value) -> String {
+    let text = |value: &Value| value.pointer("/parts/0/text").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let system = gemini_payload.get("systemInstruction").map(text).unwrap_or_default();
+    let last_user = gemini_payload["contents"]
+        .as_array()
+        .and_then(|contents| contents.iter().rev().find(|content| content["role"] == "user"))
+        .map(text)
+        .unwrap_or_default();
+    if BACKGROUND_DOWNGRADE.load(Ordering::Relaxed) && routing::is_background_task(&system, &last_user) {
+        return background_model(&catalog_snapshot());
+    }
+    resolve_upstream_model(requested_model)
+}
 
 /// Replaces the user's model mapping rules; called at startup and whenever settings are saved.
 pub fn set_model_map(rules: Vec<ModelMapRule>) {
@@ -57,18 +107,6 @@ fn keys_match(presented: &str, expected: &str) -> bool {
     !expected.is_empty()
         && presented.len() == expected.len()
         && presented.bytes().zip(expected.bytes()).fold(0u8, |difference, (a, b)| difference | (a ^ b)) == 0
-}
-
-fn mapped_model(input_model: &str, rules: &[ModelMapRule]) -> Option<String> {
-    let input = input_model.to_ascii_lowercase();
-    rules.iter().find_map(|rule| {
-        let from = rule.from.trim().to_ascii_lowercase();
-        let matches = match from.strip_suffix('*') {
-            Some(prefix) => input.starts_with(prefix),
-            None => input == from,
-        };
-        (matches && !from.is_empty() && !rule.to.trim().is_empty()).then(|| rule.to.trim().to_owned())
-    })
 }
 
 /// A fresh proxy API key. Entropy comes from the OS-seeded hasher keys the standard library
@@ -141,11 +179,14 @@ pub fn available_models(state: &HubState) -> Vec<ProxyModel> {
         return Vec::new();
     };
     let project = account.project_id.as_deref().unwrap_or("aicode-consumers");
+    let Ok(client) = upstream_client(&account) else {
+        return Vec::new();
+    };
     for url in [
         "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
         "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
     ] {
-        let response = PROXY_HTTP_CLIENT
+        let response = client
             .post(url)
             .bearer_auth(&account.access_token)
             .header(reqwest::header::USER_AGENT, "antigravity")
@@ -359,6 +400,10 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
             let err = json!({"error": {"code": 401, "type": "authentication_error", "message": "Missing or wrong API key. Copy the key from AI Usage Hub > API Proxy."}});
             return send_json_response(stream, 401, &err);
         }
+        if !settings.proxy_risk_acknowledged {
+            let err = json!({"error": {"code": 403, "type": "permission_error", "message": "The proxy is off until you accept the account-risk notice in AI Usage Hub > API Proxy."}});
+            return send_json_response(stream, 403, &err);
+        }
     }
 
     match (method.as_str(), clean_path) {
@@ -542,14 +587,13 @@ fn execute_upstream_request(
     gemini_inner_request: &Value,
     initial_upstream_model: &str,
 ) -> Result<(Value, String), String> {
-    let client = &PROXY_HTTP_CLIENT;
-
     let max_retries = 3;
     let mut current_model = initial_upstream_model.to_string();
 
     for attempt in 0..max_retries {
         // Fetch active or best available account from the pool (with automatic token refresh)
         let active_account = get_active_account(state)?;
+        let client = upstream_client(&active_account)?;
         let access_token = active_account.access_token.clone();
         let project_id = active_account.project_id.as_deref().unwrap_or("aicode-consumers");
         let account_email = active_account.email.clone();
@@ -582,6 +626,7 @@ fn execute_upstream_request(
             let mut req_builder = client
                 .post(*url)
                 .bearer_auth(&access_token)
+                .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS.load(Ordering::Relaxed)))
                 .header(reqwest::header::USER_AGENT, "antigravity")
                 .header(reqwest::header::CONTENT_TYPE, "application/json");
 
@@ -651,7 +696,7 @@ fn execute_upstream_request(
             tracing::warn!(account = %active_account.email, "Access token 401 Unauthorized; refreshing token immediately");
             if let Ok(db) = state.database.lock() {
                 if let Ok(Some(mut acc)) = db.antigravity_account(&active_account.id) {
-                    if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&acc.refresh_token) {
+                    if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&acc.refresh_token, acc.proxy_url.as_deref()) {
                         acc.access_token = token_resp.access_token;
                         acc.expiry_timestamp = chrono::Utc::now().timestamp() + token_resp.expires_in;
                         let _ = db.save_antigravity_account(&acc);
@@ -677,7 +722,6 @@ fn execute_upstream_request(
                 "Account encountered 403 Forbidden permission anomaly; marking account forbidden"
             );
             mark_account_status(state, &active_account.id, "forbidden");
-            let _ = antigravity::check_and_auto_switch(state);
             thread::sleep(Duration::from_millis(200));
             continue;
         }
@@ -691,7 +735,6 @@ fn execute_upstream_request(
                 "Account quota exhausted or rate-limited; rotating to next account in pool"
             );
             mark_account_status(state, &active_account.id, "rate_limited");
-            let _ = antigravity::check_and_auto_switch(state);
             thread::sleep(Duration::from_millis(200));
             continue;
         }
@@ -728,6 +771,17 @@ fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
             "round_robin" => {
                 let mut sorted = healthy.clone();
                 sorted.sort_by_key(|a| a.last_used);
+                sorted.first().cloned().cloned()
+            }
+            // Ultra accounts before Pro before the rest; the fuller account wins inside a tier.
+            "tier_priority" => {
+                let mut sorted = healthy.clone();
+                sorted.sort_by(|a, b| {
+                    let quota = |account: &AntigravityAccount| account.quota_remaining_percent.unwrap_or(100.0);
+                    routing::tier_rank(a.tier.as_deref())
+                        .cmp(&routing::tier_rank(b.tier.as_deref()))
+                        .then(quota(b).total_cmp(&quota(a)))
+                });
                 sorted.first().cloned().cloned()
             }
             "highest_quota" => {
@@ -768,7 +822,7 @@ fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
     let now = chrono::Utc::now().timestamp();
     if chosen.expiry_timestamp <= now + 60 && !chosen.refresh_token.is_empty() {
         tracing::info!(account = %chosen.email, "Refreshing expired Google OAuth access token for proxy request");
-        if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&chosen.refresh_token) {
+        if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&chosen.refresh_token, chosen.proxy_url.as_deref()) {
             chosen.access_token = token_resp.access_token;
             chosen.expiry_timestamp = now + token_resp.expires_in;
             if let Some(id_tok) = token_resp.id_token {
@@ -781,7 +835,7 @@ fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
 
     // Auto-heal rate_limited account if quota is restored
     if chosen.status == "rate_limited" {
-        if let Some((quota, details)) = antigravity::fetch_google_quota_summary(&chosen.access_token, chosen.project_id.as_deref()) {
+        if let Some((quota, details)) = antigravity::fetch_google_quota_summary(&chosen.access_token, chosen.project_id.as_deref(), chosen.proxy_url.as_deref()) {
             if quota > 0.0 {
                 chosen.status = "healthy".into();
                 chosen.quota_remaining_percent = Some(quota);
@@ -877,7 +931,6 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
     };
 
     let requested_model = req.model.as_deref().unwrap_or("gemini-2.5-flash");
-    let upstream_model = &resolve_upstream_model(requested_model);
 
     // Convert OpenAI messages to Gemini contents
     let mut contents = Vec::new();
@@ -945,6 +998,7 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
         gemini_payload["systemInstruction"] = sys;
     }
 
+    let upstream_model = &chat_upstream_model(requested_model, &gemini_payload);
     match execute_upstream_request(state, &gemini_payload, upstream_model) {
         Ok((upstream_res, account_email)) => {
             let latency_ms = start.elapsed().as_millis() as u64;
@@ -1071,7 +1125,6 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     };
 
     let requested_model = req.model.as_deref().unwrap_or("claude-3-7-sonnet");
-    let upstream_model = &resolve_upstream_model(requested_model);
 
     let mut contents = Vec::new();
     let mut system_instruction = None;
@@ -1143,6 +1196,7 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
         gemini_payload["systemInstruction"] = sys;
     }
 
+    let upstream_model = &chat_upstream_model(requested_model, &gemini_payload);
     match execute_upstream_request(state, &gemini_payload, upstream_model) {
         Ok((upstream_res, account_email)) => {
             let latency_ms = start.elapsed().as_millis() as u64;
@@ -1257,8 +1311,8 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     Ok(())
 }
 
-/// Base64 images found in an upstream response, in order.
-fn inline_images(upstream: &Value) -> Vec<String> {
+/// Images found in an upstream response, in order, as `(mime type, base64 data)`.
+fn inline_images(upstream: &Value) -> Vec<(String, String)> {
     upstream
         .pointer("/response/candidates")
         .or_else(|| upstream.pointer("/candidates"))
@@ -1267,12 +1321,18 @@ fn inline_images(upstream: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|candidate| candidate.pointer("/content/parts").and_then(Value::as_array))
         .flatten()
-        .filter_map(|part| part.pointer("/inlineData/data").and_then(Value::as_str).map(str::to_owned))
+        .filter_map(|part| {
+            let inline = part.get("inlineData")?;
+            let mime = inline.get("mimeType").and_then(Value::as_str).unwrap_or("image/png");
+            Some((mime.to_owned(), inline.get("data")?.as_str()?.to_owned()))
+        })
         .collect()
 }
 
 /// OpenAI Images API (`/v1/images/generations`): sends the prompt to the catalog's image model
-/// and returns the pictures as `b64_json`. One image per request; `n` and `size` are not passed on.
+/// and returns the pictures as `b64_json`, or as `data:` URLs with `response_format: "url"`.
+/// `size`, `quality`, `imageSize`, `n` and model-name suffixes are honoured (see
+/// [`routing::image_options`]); `n` images cost `n` upstream requests.
 fn handle_image_generation(stream: &mut TcpStream, state: &HubState, body: &str) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     TOTAL_REQUESTS.fetch_add(1, Ordering::Relaxed);
@@ -1281,38 +1341,48 @@ fn handle_image_generation(stream: &mut TcpStream, state: &HubState, body: &str)
         FAILED_REQUESTS.fetch_add(1, Ordering::Relaxed);
         return send_json_response(stream, 400, &json!({"error": {"code": 400, "message": "prompt is required"}}));
     };
+    let options = routing::image_options(&request);
     let requested = request.get("model").and_then(Value::as_str).unwrap_or("image");
     let catalog = available_models(state);
     let upstream_model = catalog
         .iter()
-        .find(|model| model.id == requested)
+        .find(|model| model.id == options.model)
         .or_else(|| catalog.iter().find(|model| model.id.contains("image")))
         .map_or_else(|| "gemini-3.1-flash-image".to_owned(), |model| model.id.clone());
     let payload = json!({
         "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
-        "generationConfig": { "responseModalities": ["TEXT", "IMAGE"] }
+        "generationConfig": routing::image_generation_config(&options)
     });
 
-    let result = execute_upstream_request(state, &payload, &upstream_model).and_then(|(upstream, account_email)| {
-        let images = inline_images(&upstream);
-        if images.is_empty() {
-            Err("The image model answered without an image".to_owned())
-        } else {
-            Ok((images, account_email))
+    let mut images = Vec::new();
+    let mut account_email = "-".to_owned();
+    let mut failure = None;
+    for _ in 0..options.count {
+        match execute_upstream_request(state, &payload, &upstream_model) {
+            Ok((upstream, email)) => {
+                account_email = email;
+                images.extend(inline_images(&upstream));
+            }
+            Err(message) => {
+                failure = Some(message);
+                break;
+            }
         }
-    });
+    }
     let latency_ms = start.elapsed().as_millis() as u64;
     LAST_LATENCY_MS.store(latency_ms, Ordering::Relaxed);
-    let (status_code, account_email, response) = match result {
-        Ok((images, account_email)) => {
-            SUCCESS_REQUESTS.fetch_add(1, Ordering::Relaxed);
-            let data: Vec<Value> = images.into_iter().map(|image| json!({ "b64_json": image })).collect();
-            (200, account_email, json!({ "created": chrono::Utc::now().timestamp(), "data": data }))
-        }
-        Err(message) => {
-            FAILED_REQUESTS.fetch_add(1, Ordering::Relaxed);
-            (502, "-".to_owned(), json!({"error": {"code": 502, "message": message}}))
-        }
+    // Pictures already made are returned even if a later one failed.
+    let (status_code, response) = if images.is_empty() {
+        FAILED_REQUESTS.fetch_add(1, Ordering::Relaxed);
+        let message = failure.unwrap_or_else(|| "The image model answered without an image".to_owned());
+        (502, json!({"error": {"code": 502, "message": message}}))
+    } else {
+        SUCCESS_REQUESTS.fetch_add(1, Ordering::Relaxed);
+        let data: Vec<Value> = images
+            .into_iter()
+            .map(|(mime, image)| if options.as_url { json!({ "url": format!("data:{mime};base64,{image}") }) } else { json!({ "b64_json": image }) })
+            .collect();
+        (200, json!({ "created": chrono::Utc::now().timestamp(), "data": data }))
     };
     record_proxy_log(ProxyRequestLog {
         id: format!("req_{}", chrono::Utc::now().timestamp_millis()),
@@ -1534,8 +1604,21 @@ mod tests {
         let upstream = json!({ "response": { "candidates": [
             { "content": { "parts": [{ "text": "here" }, { "inlineData": { "mimeType": "image/png", "data": "QUJD" } }] } }
         ]}});
-        assert_eq!(inline_images(&upstream), vec!["QUJD".to_string()]);
+        assert_eq!(inline_images(&upstream), vec![("image/png".to_string(), "QUJD".to_string())]);
         assert!(inline_images(&json!({ "response": { "candidates": [] } })).is_empty());
+    }
+
+    #[test]
+    fn housekeeping_requests_go_to_a_flash_model() {
+        let catalog: Vec<ProxyModel> = ["claude-sonnet-9-0", "gemini-9-flash", "gemini-9-flash-image"]
+            .iter()
+            .map(|id| ProxyModel { id: id.to_string(), display_name: None, remaining_percent: None, reset_at: None })
+            .collect();
+        assert_eq!(background_model(&catalog), "gemini-9-flash");
+        let title = json!({ "contents": [{ "role": "user", "parts": [{ "text": "Please write a 5-10 word title for the following conversation:" }] }] });
+        assert!(chat_upstream_model("claude-sonnet-4", &title).contains("flash"));
+        let work = json!({ "contents": [{ "role": "user", "parts": [{ "text": "Refactor this function" }] }] });
+        assert!(!chat_upstream_model("claude-sonnet-4", &work).contains("flash"));
     }
 
     #[test]
