@@ -79,16 +79,23 @@ pub fn process_matches(
     command_line: &str,
 ) -> bool {
     let normalized = process_name.to_ascii_lowercase();
+    // Seeded names carry Windows' `.exe`; macOS and Linux processes have none.
+    let stem = normalized.strip_suffix(".exe").unwrap_or(&normalized);
     let executable = executable_path
         .map(|path| path.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
     let command = command_line.to_ascii_lowercase();
-    let is_claude_process = matches!(normalized.as_str(), "claude.exe" | "claude");
-    let is_claude_code = executable.contains("\\claude-code\\")
-        || executable.contains("/claude-code/")
-        || command.contains("@anthropic-ai\\claude-code")
-        || command.contains("@anthropic-ai/claude-code")
-        || command.contains("\\claude-code\\");
+    let is_claude_process = stem == "claude";
+    // Claude Desktop runs from Claude.app on macOS and AnthropicClaude on Windows. Every other
+    // `claude` binary with a Unix path is the Claude Code CLI (native installer, npm, Homebrew).
+    let in_desktop_bundle = executable.contains("/claude.app/");
+    let is_claude_code = !in_desktop_bundle
+        && (executable.contains("\\claude-code\\")
+            || executable.contains("/claude-code/")
+            || command.contains("@anthropic-ai\\claude-code")
+            || command.contains("@anthropic-ai/claude-code")
+            || command.contains("\\claude-code\\")
+            || executable.starts_with('/'));
     if app.id == "claude-code" && is_claude_process {
         return is_claude_code;
     }
@@ -96,18 +103,25 @@ pub fn process_matches(
         return !is_claude_code;
     }
 
-    if app
-        .process_names
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(&normalized))
-    {
+    if app.process_names.iter().any(|candidate| {
+        let candidate = candidate.to_ascii_lowercase();
+        candidate.strip_suffix(".exe").unwrap_or(&candidate) == stem
+    }) {
+        return true;
+    }
+
+    // A macOS app's main process is the binary in `<Name>.app/Contents/MacOS/`, whatever it is
+    // called (VS Code's is `Electron`); helpers live under `Contents/Frameworks/` and do not count.
+    if mac_bundles(&app.id).iter().any(|bundle| {
+        executable.contains(&format!("/{}/contents/macos/", bundle.to_ascii_lowercase()))
+    }) {
         return true;
     }
 
     matches!(
         app.id.as_str(),
         "claude-code" | "gemini" | "codex" | "opencode"
-    ) && matches!(normalized.as_str(), "node.exe" | "node")
+    ) && stem == "node"
         && command.contains(match app.id.as_str() {
             "claude-code" => "claude-code",
             "gemini" => "gemini",
@@ -121,23 +135,43 @@ pub fn resolve_executable(app: &ApplicationDefinition) -> Option<PathBuf> {
         .executable_path
         .as_ref()
         .map(PathBuf::from)
-        .filter(|path| valid_windows_executable(path))
+        .filter(|path| crate::platform::is_launchable(path))
     {
         return Some(path);
     }
 
     known_candidates(&app.id)
         .into_iter()
-        .find(|path| valid_windows_executable(path))
+        .find(|path| crate::platform::is_launchable(path))
 }
 
-fn valid_windows_executable(path: &Path) -> bool {
-    path.is_file()
-        && path
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+/// App bundle names of the desktop apps the hub knows, for macOS detection and launching.
+fn mac_bundles(app_id: &str) -> &'static [&'static str] {
+    match app_id {
+        "codex" => &["Codex.app"],
+        "chatgpt" => &["ChatGPT.app"],
+        "claude" => &["Claude.app"],
+        "antigravity" => &["Antigravity.app", "Antigravity IDE.app"],
+        "cursor" => &["Cursor.app"],
+        "vscode" => &["Visual Studio Code.app"],
+        "kimi" => &["Kimi.app"],
+        _ => &[],
+    }
 }
 
+#[cfg(target_os = "macos")]
+fn known_candidates(app_id: &str) -> Vec<PathBuf> {
+    let mut roots = vec![PathBuf::from("/Applications")];
+    if let Some(home) = crate::platform::home_dir() {
+        roots.push(home.join("Applications"));
+    }
+    roots
+        .iter()
+        .flat_map(|root| mac_bundles(app_id).iter().map(move |bundle| root.join(bundle)))
+        .collect()
+}
+
+#[cfg(not(target_os = "macos"))]
 fn known_candidates(app_id: &str) -> Vec<PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     let programs = std::env::var_os("ProgramFiles").map(PathBuf::from);
@@ -232,6 +266,35 @@ mod tests {
             Some(code_path),
             ""
         ));
+    }
+
+    #[test]
+    fn macos_processes_match_by_name_and_app_bundle() {
+        let codex = definition("codex", &["codex.exe"]);
+        assert!(process_matches(&codex, "Codex", Some(Path::new("/Applications/Codex.app/Contents/MacOS/Codex")), ""));
+
+        let vscode = definition("vscode", &["code.exe"]);
+        let main = Path::new("/Applications/Visual Studio Code.app/Contents/MacOS/Electron");
+        let helper = Path::new(
+            "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)",
+        );
+        assert!(process_matches(&vscode, "Electron", Some(main), ""));
+        assert!(!process_matches(&vscode, "Code Helper (Renderer)", Some(helper), ""));
+        assert!(!process_matches(&codex, "Electron", Some(main), ""));
+    }
+
+    #[test]
+    fn macos_claude_desktop_and_cli_are_distinguished() {
+        let desktop = definition("claude", &["claude.exe"]);
+        let code = definition("claude-code", &["claude-code.exe"]);
+        let app = Path::new("/Applications/Claude.app/Contents/MacOS/Claude");
+        let cli = Path::new("/Users/me/.local/share/claude/versions/2.1.0");
+
+        assert!(process_matches(&desktop, "Claude", Some(app), ""));
+        assert!(!process_matches(&code, "Claude", Some(app), ""));
+        assert!(process_matches(&code, "claude", Some(cli), "claude"));
+        assert!(!process_matches(&desktop, "claude", Some(cli), "claude"));
+        assert!(process_matches(&code, "node", None, "node /opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js"));
     }
 
     #[test]

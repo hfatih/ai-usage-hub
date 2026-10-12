@@ -222,8 +222,8 @@ impl CachedClaudeUsage {
 }
 
 fn desktop_usage(expected_organization: Option<&str>) -> Option<CachedClaudeUsage> {
-    let app_data = env::var_os("APPDATA")?;
-    let bytes = fs::read(PathBuf::from(app_data).join("Claude/plan-usage-history.json")).ok()?;
+    let app_data = crate::platform::app_data_dir()?;
+    let bytes = fs::read(app_data.join("Claude/plan-usage-history.json")).ok()?;
     desktop_usage_from_bytes(&bytes, expected_organization)
 }
 
@@ -299,12 +299,12 @@ fn inferred_resets(
 }
 
 fn recent_claude_tokens(now: i64) -> i64 {
-    let Some(home) = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME")) else {
+    let Some(home) = crate::platform::home_dir() else {
         return 0;
     };
     let cutoff = now.saturating_sub(86_400);
     let mut messages = HashMap::new();
-    super::recent_jsonl_files(&PathBuf::from(home).join(".claude/projects"), cutoff)
+    super::recent_jsonl_files(&home.join(".claude/projects"), cutoff)
         .into_iter()
         .filter_map(|path| fs::File::open(path).ok())
         .map(BufReader::new)
@@ -365,8 +365,7 @@ struct CachedClaudeAccount {
 }
 
 fn cached_account() -> Option<CachedClaudeAccount> {
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
-    let home = PathBuf::from(home);
+    let home = crate::platform::home_dir()?;
     let profile = read_json(&home.join(".claude.json"));
     cached_account_from_value(profile.as_ref())
 }
@@ -468,12 +467,14 @@ fn claude_candidates() -> Vec<PathBuf> {
     if let Some(path) = env::var_os("AI_USAGE_HUB_CLAUDE_EXECUTABLE") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(app_data) = env::var_os("APPDATA") {
-        let root = PathBuf::from(app_data).join("Claude/claude-code");
+    let claude = crate::platform::executable_name("claude");
+    // Claude Desktop keeps its bundled Claude Code under its data folder, one folder per version.
+    if let Some(app_data) = crate::platform::app_data_dir() {
+        let root = app_data.join("Claude/claude-code");
         if let Ok(entries) = fs::read_dir(root) {
             let mut installed: Vec<_> = entries
                 .flatten()
-                .map(|entry| entry.path().join("claude.exe"))
+                .map(|entry| entry.path().join(&claude))
                 .filter(|path| path.is_file())
                 .collect();
             installed.sort_by_key(|path| fs::metadata(path).and_then(|item| item.modified()).ok());
@@ -481,9 +482,15 @@ fn claude_candidates() -> Vec<PathBuf> {
             candidates.extend(installed);
         }
     }
-    if let Some(user_profile) = env::var_os("USERPROFILE") {
-        candidates.push(PathBuf::from(user_profile).join(".local/bin/claude.exe"));
+    if let Some(home) = crate::platform::home_dir() {
+        candidates.push(home.join(".local/bin").join(&claude));
     }
+    candidates.extend(
+        crate::platform::extra_bin_dirs()
+            .into_iter()
+            .map(|dir| dir.join(&claude))
+            .filter(|path| path.is_file()),
+    );
     candidates.push(PathBuf::from("claude"));
     candidates.dedup();
     candidates

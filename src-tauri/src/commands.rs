@@ -161,13 +161,16 @@ pub fn set_app_executable(
     executable_path: String,
 ) -> Result<()> {
     let canonical = std::fs::canonicalize(&executable_path)?;
-    if !canonical.is_file()
-        || !canonical
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
+    if !crate::platform::is_launchable(&canonical) {
         return Err(HubError::Configuration(
-            "select a valid Windows .exe file".into(),
+            if cfg!(windows) {
+                "select a valid Windows .exe file"
+            } else if cfg!(target_os = "macos") {
+                "select an application (.app) or an executable file"
+            } else {
+                "select an executable file"
+            }
+            .into(),
         ));
     }
     let path = canonical.to_string_lossy();
@@ -196,6 +199,16 @@ pub fn launch(state: &HubState, app_id: &str) -> Result<()> {
 }
 
 fn spawn_hidden(executable: &Path, arguments: &[String]) -> Result<()> {
+    // An app bundle is a folder; Launch Services starts it (or brings it forward if it is open).
+    if cfg!(target_os = "macos") && executable.is_dir() {
+        let mut command = Command::new("/usr/bin/open");
+        command.arg("-a").arg(executable);
+        if !arguments.is_empty() {
+            command.arg("--args").args(arguments);
+        }
+        command.spawn()?;
+        return Ok(());
+    }
     let mut command = Command::new(executable);
     command.args(arguments);
     if let Some(parent) = executable.parent() {
@@ -313,11 +326,8 @@ pub fn start_antigravity_oauth_login(
 ) -> Result<AntigravityAccount> {
     let auth_url = crate::antigravity::get_google_oauth_auth_url();
 
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", &auth_url])
-            .spawn();
+    if let Err(error) = crate::platform::open_url(&auth_url) {
+        tracing::warn!(%error, "could not open the browser for Google sign-in");
     }
 
     let code = crate::antigravity::listen_for_oauth_callback(120)?;

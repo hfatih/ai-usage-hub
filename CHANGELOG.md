@@ -3,6 +3,17 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [Unreleased] - macOS port (`macos` branch)
+
+- Bring the `macos` branch up to 0.1.22 and port the Windows-only parts:
+  data, log and Claude/Antigravity paths under `~/Library`; app detection and
+  launching through `.app` bundles; command-line tools found in Homebrew, npm
+  and `~/.local/bin` folders.
+- Encrypt Antigravity pool tokens with ChaCha20-Poly1305 under a key kept in
+  the login Keychain, and switch Antigravity accounts through its Keychain item.
+- Native macOS window buttons, menu-bar hiding with Dock reopen, macOS wording
+  in the interface, and `.app`/`.dmg` bundles built on macOS in CI.
+
 ## [0.1.22] - 2026-10-12
 
 - Encrypt Antigravity sign-in tokens in the local database with Windows data

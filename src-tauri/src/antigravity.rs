@@ -37,6 +37,20 @@ pub const OAUTH_REDIRECT_URI: &str = "http://localhost:8045/auth/callback";
 const TARGET_CREDENTIAL: &str = "gemini:antigravity";
 const TARGET_USERNAME: &str = "antigravity";
 
+/// The OS store Antigravity keeps its Google sign-in in, as named in messages.
+#[cfg(windows)]
+pub const CREDENTIAL_STORE: &str = "Windows Credential Manager";
+#[cfg(target_os = "macos")]
+pub const CREDENTIAL_STORE: &str = "macOS Keychain";
+#[cfg(not(any(windows, target_os = "macos")))]
+pub const CREDENTIAL_STORE: &str = "system keyring";
+
+/// Sent to Google's quota endpoint, in the form Antigravity itself uses for this OS.
+#[cfg(target_os = "macos")]
+const CLIENT_USER_AGENT: &str = "antigravity/darwin";
+#[cfg(not(target_os = "macos"))]
+const CLIENT_USER_AGENT: &str = "antigravity/windows";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyringTokenDetails {
     pub access_token: String,
@@ -69,7 +83,7 @@ pub struct TokenRefreshResponse {
 
 /// Win32 native credential manager calls for Windows
 #[cfg(windows)]
-mod win_cred {
+mod system_cred {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
 
@@ -184,22 +198,37 @@ mod win_cred {
     }
 }
 
-#[cfg(not(windows))]
-mod win_cred {
+/// macOS Keychain. Antigravity's `go-keyring` turns the Windows target `gemini:antigravity` into
+/// a generic password with service `gemini` and account `antigravity`.
+#[cfg(target_os = "macos")]
+mod system_cred {
+    fn service(target: &str) -> &str {
+        target.split_once(':').map_or(target, |(service, _)| service)
+    }
+
+    pub fn read_credential(target: &str) -> Result<Option<String>, String> {
+        crate::keychain::read(service(target), super::TARGET_USERNAME)
+    }
+
+    pub fn write_credential(target: &str, user: &str, secret: &[u8]) -> Result<(), String> {
+        let secret = std::str::from_utf8(secret).map_err(|error| error.to_string())?;
+        crate::keychain::write(service(target), user, secret)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+mod system_cred {
     pub fn read_credential(_target: &str) -> Result<Option<String>, String> {
         Ok(None)
     }
     pub fn write_credential(_target: &str, _user: &str, _secret: &[u8]) -> Result<(), String> {
-        Ok(())
-    }
-    pub fn delete_credential(_target: &str) -> Result<(), String> {
-        Ok(())
+        Err(format!("switching accounts is not supported on this OS yet ({})", super::CREDENTIAL_STORE))
     }
 }
 
-/// Read active Antigravity credential payload from Windows Credential Manager
+/// Read the active Antigravity credential payload from the OS credential store
 pub fn read_system_antigravity_credential() -> Result<Option<KeyringPayload>> {
-    let raw = win_cred::read_credential(TARGET_CREDENTIAL)
+    let raw = system_cred::read_credential(TARGET_CREDENTIAL)
         .map_err(|e| HubError::Operation(format!("Credential read failed: {}", e)))?;
 
     let Some(content) = raw else {
@@ -211,12 +240,12 @@ pub fn read_system_antigravity_credential() -> Result<Option<KeyringPayload>> {
     Ok(Some(payload))
 }
 
-/// Write Antigravity credential payload to Windows Credential Manager
+/// Write an Antigravity credential payload to the OS credential store
 pub fn write_system_antigravity_credential(payload: &KeyringPayload) -> Result<()> {
     let json = serde_json::to_string(payload)
         .map_err(|e| HubError::Operation(format!("Credential serialization failed: {}", e)))?;
 
-    win_cred::write_credential(TARGET_CREDENTIAL, TARGET_USERNAME, json.as_bytes())
+    system_cred::write_credential(TARGET_CREDENTIAL, TARGET_USERNAME, json.as_bytes())
         .map_err(|e| HubError::Operation(format!("Credential write failed: {}", e)))?;
     Ok(())
 }
@@ -524,13 +553,21 @@ fn heal_if_reset(acc: &mut AntigravityAccount, now: i64) -> bool {
 }
 
 fn vscdb_item(key: &str) -> Option<String> {
-    let appdata = std::env::var_os("APPDATA")?;
+    let appdata = crate::platform::app_data_dir()?;
     ["Antigravity", "Antigravity IDE"].iter().find_map(|flavour| {
-        let path = std::path::PathBuf::from(&appdata).join(flavour).join("User/globalStorage/state.vscdb");
+        let path = appdata.join(flavour).join("User/globalStorage/state.vscdb");
         if !path.exists() {
             return None;
         }
-        let uri = format!("file:{}?mode=ro", path.to_string_lossy().replace('\\', "/"));
+        // `?`, `#` and `%` would end or alter a SQLite URI path ("Application Support" has a space).
+        let escaped = path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('?', "%3f")
+            .replace('#', "%23");
+        let uri = format!("file:{escaped}?mode=ro");
         rusqlite::Connection::open_with_flags(
             &uri,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
@@ -614,7 +651,7 @@ pub fn read_vscdb_antigravity_account() -> Option<(String, Option<String>)> {
 
 /// Authoritative detection of the active Antigravity session across:
 /// 1. Live Language Server process (actively running IDE)
-/// 2. Windows Credential Manager (gemini:antigravity)
+/// 2. OS credential store (Windows Credential Manager / macOS Keychain, gemini:antigravity)
 /// 3. VS Code / Antigravity state.vscdb
 pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
     let now = Utc::now().timestamp();
@@ -637,7 +674,7 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
         }
     }
 
-    // Priority 2: Windows Credential Manager (when IDE is closed)
+    // Priority 2: OS credential store (when IDE is closed)
     if let Ok(Some(cred)) = read_system_antigravity_credential() {
         let (email_opt, name_opt) = cred
             .token
@@ -656,8 +693,8 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
                 is_running: false,
                 email: Some(email),
                 name: name_opt,
-                plan: Some("Antigravity (Windows Vault)".into()),
-                source: "Windows Credential Manager".into(),
+                plan: Some(format!("Antigravity ({CREDENTIAL_STORE})")),
+                source: CREDENTIAL_STORE.into(),
                 port: None,
                 verified_at: now,
                 quota_details,
@@ -852,7 +889,7 @@ pub fn fetch_google_quota_response(
             let resp = client
                 .post(*url)
                 .bearer_auth(access_token)
-                .header(reqwest::header::USER_AGENT, "antigravity/windows")
+                .header(reqwest::header::USER_AGENT, CLIENT_USER_AGENT)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .json(body)
                 .send();
@@ -971,7 +1008,8 @@ pub fn kill_antigravity_language_servers() -> usize {
             .map(|path| path.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
 
-        let is_ls = name_lower.starts_with("language_server") || name_lower == "language_server.exe";
+        // language_server_windows_x64.exe, language_server_macos_arm, ...
+        let is_ls = name_lower.starts_with("language_server");
         let is_antigravity = executable.contains("antigravity")
             || process.cmd().iter().any(|c| c.to_string_lossy().to_ascii_lowercase().contains("antigravity"));
 
@@ -984,10 +1022,10 @@ pub fn kill_antigravity_language_servers() -> usize {
     killed
 }
 
-/// Capture current account from Windows Credential Manager, UserInfo, and Google CloudCode APIs
+/// Capture current account from the OS credential store, UserInfo, and Google CloudCode APIs
 pub fn capture_current_account(database: &Mutex<Database>) -> Result<AntigravityAccount> {
     let cred = read_system_antigravity_credential()?
-        .ok_or_else(|| HubError::Operation("No Antigravity credential found in Windows Credential Manager. Please sign in to Antigravity first.".into()))?;
+        .ok_or_else(|| HubError::Operation(format!("No Antigravity credential found in {CREDENTIAL_STORE}. Please sign in to Antigravity first.")))?;
 
     let now = Utc::now().timestamp();
     let mut details = cred.token;
@@ -1091,7 +1129,7 @@ fn wait_for_live_email(timeout: Duration) -> Option<String> {
     None
 }
 
-/// Switches Antigravity to a pooled account: writes its token to Windows Credential Manager and
+/// Switches Antigravity to a pooled account: writes its token to the OS credential store and
 /// restarts the language server so the IDE picks it up.
 ///
 /// Refuses accounts without a saved refresh token (writing an empty credential would sign the
@@ -1156,7 +1194,7 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
             .map_or_else(|| "consumer".into(), |credential| credential.auth_method.clone()),
     };
 
-    // 1. Write to Windows Credential Store
+    // 1. Write to the OS credential store
     write_system_antigravity_credential(&payload)?;
 
     // 2. Hot switch: kill running language server so Antigravity picks up new account
@@ -1463,7 +1501,7 @@ mod tests {
                     .post(*endpoint)
                     .bearer_auth(&cred.token.access_token)
                     .header("content-type", "application/json")
-                    .header("user-agent", "antigravity/windows")
+                    .header("user-agent", CLIENT_USER_AGENT)
                     .body(serde_json::json!({
                         "project": "aicode-consumers"
                     }).to_string())

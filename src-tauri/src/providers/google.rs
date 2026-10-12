@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, time::Duration};
 
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
@@ -434,10 +434,9 @@ fn valid_csrf_token(value: &str) -> bool {
 /// Language server logs of every Antigravity flavour, most recently written first: the running
 /// server is the one still appending, and a leftover log from the other flavour holds a dead port.
 fn antigravity_log_candidates() -> Vec<PathBuf> {
-    let Some(app_data) = env::var_os("APPDATA") else {
+    let Some(root) = crate::platform::app_data_dir() else {
         return Vec::new();
     };
-    let root = PathBuf::from(app_data);
     let mut logs = vec![
         root.join("Antigravity/logs/language_server.log"),
         root.join("Antigravity IDE/logs/language_server.log"),

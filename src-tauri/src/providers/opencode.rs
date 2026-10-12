@@ -186,8 +186,8 @@ fn data_root() -> Option<PathBuf> {
     if let Some(path) = env::var_os("XDG_DATA_HOME") {
         candidates.push(PathBuf::from(path).join("opencode"));
     }
-    if let Some(home) = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME")) {
-        candidates.push(PathBuf::from(home).join(".local/share/opencode"));
+    if let Some(home) = crate::platform::home_dir() {
+        candidates.push(home.join(".local/share/opencode"));
     }
     candidates.into_iter().find(|path| path.is_dir())
 }
@@ -267,10 +267,8 @@ fn opencode_running() -> bool {
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::All, true);
     system.processes().values().any(|process| {
-        process
-            .name()
-            .to_string_lossy()
-            .eq_ignore_ascii_case("opencode.exe")
+        let name = process.name().to_string_lossy();
+        name.eq_ignore_ascii_case("opencode.exe") || name.eq_ignore_ascii_case("opencode")
     })
 }
 

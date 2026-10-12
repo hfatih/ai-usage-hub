@@ -5,6 +5,7 @@ import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
 import { formatDuration, formatUsageValue, relativeTime } from "../lib/format";
 import { useHub } from "../stores/hub";
+import { byPlatform } from "../lib/platform";
 
 export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const { language, t } = useTranslation();
@@ -21,7 +22,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => vo
   return (
     <>
       <section className="hero-row">
-        <div><span className="eyebrow">{t("Good to see you")}</span><h1>{t("Your AI workspace,")}<br /><em>{t("quietly organized.")}</em></h1><p>{t("Live app status and verified provider data — kept local on this PC.")}</p></div>
+        <div><span className="eyebrow">{t("Good to see you")}</span><h1>{t("Your AI workspace,")}<br /><em>{t("quietly organized.")}</em></h1><p>{t(byPlatform("Live app status and verified provider data — kept local on this PC.", "Live app status and verified provider data — kept local on this Mac."))}</p></div>
         <div className="hero-actions"><button className="secondary-button" onClick={() => void toggleMonitoring()}>{snapshot.monitoringPaused ? <Play size={16} /> : <Pause size={16} />}{t(snapshot.monitoringPaused ? "Resume monitoring" : "Pause monitoring")}</button></div>
       </section>
 

@@ -27,6 +27,7 @@ import { api } from "../lib/ipc";
 import { useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
 import type { ModelMapRule, ProxyModel, ProxyStatus } from "../types";
+import { byPlatform } from "../lib/platform";
 
 export function ProxyPage() {
   const { t } = useTranslation();
@@ -208,7 +209,7 @@ export function ProxyPage() {
             <KeyRound size={19} />
             <span>
               <strong>{t("API key")}</strong>
-              <small>{t("Tools must send this key. Without it, any program on this PC could spend your accounts' quota.")}</small>
+              <small>{t(byPlatform("Tools must send this key. Without it, any program on this PC could spend your accounts' quota.", "Tools must send this key. Without it, any program on this Mac could spend your accounts' quota."))}</small>
             </span>
           </div>
           <div className="proxy-key-row">
