@@ -105,9 +105,11 @@ export function shortResetTime(epochSeconds: number | null): string {
   if (!epochSeconds) return "";
   const seconds = epochSeconds - Math.floor(Date.now() / 1000);
   if (seconds <= 0) return currentLanguage() === "tr" ? "Yenilendi" : "Reset";
+  const tr = currentLanguage() === "tr";
+  const days = Math.floor(seconds / 86400);
+  if (days > 0) return `${days}${tr ? "g" : "d"} ${Math.floor((seconds % 86400) / 3600)}${tr ? "sa" : "h"}`;
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.max(1, Math.floor((seconds % 3600) / 60));
-  const tr = currentLanguage() === "tr";
   if (hours > 0) return `${hours}${tr ? "sa" : "h"} ${minutes}${tr ? "dk" : "m"}`;
   return `${minutes}${tr ? "dk" : "m"}`;
 }

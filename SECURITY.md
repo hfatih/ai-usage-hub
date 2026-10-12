@@ -5,7 +5,7 @@ Do not report secrets by committing them. This repository should never contain A
 Security-sensitive changes must preserve these invariants:
 
 1. Credentials are stored only through a Windows-protected secret store.
-2. Provider access uses documented APIs, OAuth flows, or supported official local status output.
+2. Provider access uses the provider's own endpoints: documented APIs and OAuth flows where they exist, otherwise the same local or internal interfaces the provider's own app uses.
 3. Unsupported usage remains unavailable; it is not inferred from unrelated local data.
 4. Executables are launched directly from validated `.exe` paths without shell interpolation.
 5. Logs redact authorization, cookie, token, secret, and API-key fields before persistence.

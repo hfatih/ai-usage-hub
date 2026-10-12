@@ -1,15 +1,15 @@
 <div align="center">
   <img src="docs/images/logo.svg" alt="AI Usage Hub Logo" width="84" height="84">
   <h1>AI Usage Hub</h1>
-  <p><strong>The Private Multi-Provider AI Cockpit, Local API Gateway &amp; Zero-Restart Antigravity Session Switcher for Windows.</strong></p>
+  <p><strong>Local-first AI usage dashboard, Antigravity account switcher and local API proxy for Windows.</strong></p>
 
   <p>
     <strong>Language:</strong> <a href="README.md"><strong>EN</strong></a> | <a href="README.tr.md"><strong>TR</strong></a>
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Download Release</a> ·
-    <a href="#-quick-client-presets">Client Presets</a> ·
-    <a href="#-architecture">Architecture</a> ·
-    <a href="#-support--sponsorship">Buy Me a Coffee</a>
+    <a href="#connecting-tools">Connecting tools</a> ·
+    <a href="#how-it-works">How it works</a> ·
+    <a href="#support">Buy Me a Coffee</a>
   </p>
 
   <p>
@@ -26,9 +26,9 @@
 
 ---
 
-## ☕ Support & Sponsorship
+## Support
 
-If **AI Usage Hub** saves you subscription headaches, unlocks unlimited coding workflows, or prevents quota lockouts, consider supporting its active development:
+If **AI Usage Hub** is useful to you, you can support its development:
 
 <div align="center">
   <a href="https://buymeacoffee.com/hfatih" target="_blank">
@@ -41,222 +41,185 @@ If **AI Usage Hub** saves you subscription headaches, unlocks unlimited coding w
   <p><sub><em>Your support keeps the project independent, free, and continuously updated with provider changes.</em></sub></p>
 </div>
 
----
 
-## 🚀 Overview
+## Overview
 
-**AI Usage Hub** is a lightweight, local-first Windows companion designed for developers and AI power users. It unifies provider quotas, active sessions, runtime analytics, and multi-account rotation into one clean dashboard.
+**AI Usage Hub** is a small Windows desktop app that shows, in one place, how much of your AI subscriptions you have left. It reads quota from the tools already signed in on your PC (Codex, Claude Code and Claude Desktop, Google Antigravity, OpenCode) and keeps everything in a local database. There is no telemetry and no account with us.
 
-It also embeds a **high-performance local AI API Gateway** (`http://127.0.0.1:8046`), allowing your favorite external development tools (**Claude Code CLI, Cursor, Windsurf, Aider, Cline, Continue.dev**) to seamlessly leverage your existing AI accounts with automatic rate-limit failover, native reasoning budget management, and zero token leakage.
+For Google Antigravity it goes further: it keeps a pool of your Google accounts, shows each one's real quota, switches the IDE between them, and can expose them to other tools through a local API proxy.
 
----
+## Screenshots
 
-## 📸 Visual Tour
-
-| **Dashboard & Runtime Analytics** |
+| Dashboard |
 | :---: |
-| ![Dashboard Overview](docs/images/dashboard.svg) |
-| *Real-time app runtimes, rolling 5-hour quota windows, and active process tracking.* |
+| ![Dashboard](docs/images/dashboard.jpg) |
+| *Provider quotas, reset times and which AI apps are running.* |
 
-| **Antigravity Multi-Account Matrix & Hot-Switcher** |
+| Antigravity account pool |
 | :---: |
-| ![Antigravity Account Pool](docs/images/antigravity-pool.svg) |
-| *Authoritative 3-tier live session detection, zero-restart instant hot-switching, and 429 failover.* |
+| ![Antigravity account pool](docs/images/accounts.jpg) |
+| *Live IDE session, per-account 5-hour and weekly quota, switching and auto-switch.* |
 
-| **Local AI API Gateway (`127.0.0.1:8046`)** |
+| Local API proxy |
 | :---: |
-| ![API Proxy Matrix](docs/images/proxy-matrix.svg) |
-| *Dual-protocol relay (OpenAI + Anthropic), Claude 3.7 reasoning budget support, and client presets.* |
+| ![API proxy](docs/images/api-proxy.jpg) |
+| *Proxy address, API key, model rules and copy-paste setup for common tools.* |
 
----
+Screenshots use the app's built-in preview data.
 
-## ✨ Key Features
+## Features
 
-### ⚡ Antigravity Multi-Account Matrix & Live Hot-Switcher
-- **Authoritative 3-Tier Live Session Detection:** Identifies the active Google Antigravity account using LanguageServer IPC process ports (Tier 1), Windows Credential Manager tokens (Tier 2), and `state.vscdb` local databases (Tier 3). Never shows a false or stale account.
-- **Zero-Restart Instant Hot-Switching:** Switch between work, personal, and research accounts on the fly without closing your IDE. Cleans stale LanguageServer instances automatically (`kill_antigravity_language_servers`).
-- **Rolling 5-Hour Sliding Window Quota Math:** Accurately computes remaining Gemini and Claude quotas based on sliding timestamps, completely eliminating the common false 0% lock bug.
-- **Official Google OAuth 2.0 Integration:** Secure browser-based OAuth flow on local port `8045` for official token provisioning.
-- **Auto-Rotation on 429 Rate Limits:** Automatically routes API requests to standby accounts in your pool when rate limits are triggered.
-- **Encrypted Local Storage:** All account credentials and cookies are sealed locally using Windows DPAPI / AES-256-GCM.
+### Usage dashboard
 
-### 🌐 High-Performance Local AI API Gateway (`127.0.0.1:8046`)
-- **Dual-Protocol Compatibility:** Seamlessly exposes both:
-  - `POST /v1/chat/completions` (OpenAI format for Cursor, Windsurf, Aider)
-  - `POST /v1/messages` (Anthropic format for Claude Code CLI)
-- **Claude 3.7 Sonnet Reasoning Budget:** Full support for extended thinking parameters (`thinkingConfig.thinkingBudget`).
-- **Silent Background Downgrading:** Automatically downgrades background indexing and routine tasks to lightweight models (e.g. Gemini 2.5 Flash) to conserve high-tier quota.
-- **Full Server-Sent Events (SSE) Streaming:** Ultra-low latency token streaming and keep-alive connection pooling.
-- **100% Offline Relay:** Relays directly between your local editor and upstream endpoints; no intermediate cloud servers or analytics.
+- **ChatGPT / Codex:** shared 5-hour and weekly windows with reset times, read from the signed-in Codex app.
+- **Claude Desktop / Claude Code:** shared 5-hour and weekly quota and local token totals.
+- **Google Antigravity:** Gemini and Claude/GPT quota windows, the Google One AI credit balance, and Antigravity's prompt and flow credits.
+- **OpenCode:** connected providers, the free model catalog and local token and cost totals.
+- Every value is labeled *Official*, *Local*, *Calculated* or *Unavailable*. The app does not show a number it could not read.
+- Local alerts when a quota drops below your thresholds, with optional Windows notifications.
+- Tracks how long each AI app has been open today and this week.
 
-### 📊 Multi-Provider AI Command Center
-- **ChatGPT & OpenAI Codex:** Shared 5-hour and weekly quota meters, reset countdowns, plan tiers, and local token counters.
-- **Claude Desktop & Claude Code CLI:** Local plan history tracking, live app process states, and device-wide token statistics.
-- **Google Antigravity:** Real-time Gemini 2.5 Pro / Flash and Claude 3.7 Sonnet quota windows.
-- **OpenCode & Community Tools:** Local session metrics, catalog mapping, and process health checks.
+### Antigravity account pool
 
-### 🔒 100% Local-First & Zero Telemetry
-- **Zero Telemetry:** No tracking, no crash telemetry, and no remote analytic beacons.
-- **Local SQLite Database (`ai-usage-hub.sqlite3`):** Every snapshot, account label, and runtime session stays encrypted in `%APPDATA%\com.aiusagehub.desktop\`.
-- **Integrity Verified:** Prominently labels metrics as *Official*, *Local*, *Calculated*, or *Unavailable* so you always know data authenticity.
+- **Live session detection:** asks the running Antigravity language server which account is signed in; falls back to Windows Credential Manager and Antigravity's local state when the IDE is closed.
+- **Real quota for every account:** each pooled account's 5-hour and weekly windows, with reset times, refreshed from Google every ten minutes.
+- **Account switching:** writes the chosen account's sign-in to Windows Credential Manager and restarts Antigravity's language server. The hub then checks which account the IDE reports; if it is still the old one, it restores the previous sign-in and tells you.
+- **Auto-switch:** moves to another healthy account when the current one falls below your threshold or gets rate limited.
+- **Add accounts** with Google sign-in in the browser, by capturing the account currently signed in to the IDE, or by importing JSON.
+- **Batch delete**, search, sort, grid and list views, JSON export and import.
 
----
+### Local API proxy (`http://127.0.0.1:8046`)
 
-## 🏗️ Architecture
+- **Three API formats:** OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`) and Gemini (`/v1beta/models/...:generateContent`).
+- **Image generation:** OpenAI Images format (`/v1/images/generations`), returned as `b64_json`.
+- **Live model list:** `/v1/models` and the test panel show the models your account can actually call, read from Google. Real model ids pass through unchanged; familiar names such as `claude-3-7-sonnet` or `gpt-4o` are mapped to the current equivalent.
+- **Model rules:** send any model name a tool asks for to a model you choose (`gpt-4*` → a Gemini model, for example).
+- **API key:** the proxy rejects requests without the key shown in the app. It listens on `127.0.0.1` only.
+- **Failover:** on a 429 or 403 the proxy marks the account and retries with the next healthy one.
+- **Haiku downgrade:** requests for Haiku-class models (background tasks such as title generation in Claude Code) go to a Flash model to save Claude quota.
+
+Limits worth knowing: streaming responses are delivered as a single chunk rather than token by token, and one image is generated per request.
+
+> [!WARNING]
+> Using pooled Google accounts through a local proxy may violate Google's Terms of Service and could get an account suspended. The usage dashboard does not need the proxy; use the proxy at your own risk.
+
+## How it works
 
 ```mermaid
-flowchart TD
-    subgraph IDE_Tools ["External Developer Tools"]
-        CC["Claude Code CLI"]
-        CU["Cursor / Windsurf"]
-        AI["Aider / Cline / Continue"]
+flowchart LR
+    subgraph Tools["Your tools"]
+        CC["Claude Code"]
+        ED["Cursor, Aider, Cline, Continue"]
     end
 
-    subgraph Hub ["AI Usage Hub (Local Windows Desktop)"]
-        subgraph Gateway ["Local API Proxy (127.0.0.1:8046)"]
-            PR["Protocol Translator\nOpenAI / Anthropic"]
-            RM["Reasoning Budget Mapper\nClaude 3.7 Thinking"]
-            AR["429 Auto-Rotation Engine"]
-        end
-
-        subgraph AccountPool ["Antigravity Account Pool"]
-            T1["Tier 1: LanguageServer IPC (Port Scan)"]
-            T2["Tier 2: Windows Credential Vault"]
-            T3["Tier 3: Local state.vscdb"]
-            HS["Zero-Restart Hot-Switcher"]
-        end
-
-        subgraph Core ["Desktop Core (Tauri 2 + Rust)"]
-            DB[("SQLite Database\nWAL Mode")]
-            PM["Process Monitor & Quota Math"]
-        end
+    subgraph Hub["AI Usage Hub (Tauri 2 + Rust)"]
+        PX["Local proxy<br/>127.0.0.1:8046"]
+        POOL["Account pool<br/>and switcher"]
+        MON["Quota readers<br/>and process monitor"]
+        DB[("SQLite<br/>tokens encrypted with DPAPI")]
     end
 
-    subgraph Upstream ["Upstream AI Endpoints"]
-        GAPI["Google Antigravity / LanguageServer"]
-        OAPI["OpenAI Platform"]
-        AAPI["Anthropic Platform"]
+    subgraph Local["On this PC"]
+        AG["Antigravity language server"]
+        WCM["Windows Credential Manager"]
+        APPS["Codex, Claude, OpenCode"]
     end
 
-    CC -->|ANTHROPIC_BASE_URL| PR
-    CU -->|OpenAI Base URL| PR
-    AI -->|OpenAI Base URL| PR
+    G["Google Cloud Code API"]
 
-    PR --> RM --> AR
-    AR -->|Active Account| HS
-    HS --> GAPI
-    AR -.->|Direct Pass| OAPI
-    AR -.->|Direct Pass| AAPI
-
-    AccountPool --> Core
-    Gateway --> Core
+    CC -->|"Anthropic format + key"| PX
+    ED -->|"OpenAI format + key"| PX
+    PX --> POOL
+    POOL -->|"quota, models, requests"| G
+    POOL -->|"switch account"| WCM
+    MON -->|"live session and quota"| AG
+    MON --> APPS
+    POOL --> DB
+    MON --> DB
 ```
 
----
+## Connecting tools
 
-## 🛠️ Quick Client Presets
+Copy the API key from **API Proxy** in the app and use it wherever `YOUR_KEY` appears. The app shows these snippets with your key already filled in.
 
-Configure your external development tools to use AI Usage Hub's local API gateway (`http://127.0.0.1:8046`):
+**Claude Code**
 
-### 1. Claude Code CLI
-In PowerShell or command prompt:
 ```powershell
-$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8046"
-$env:ANTHROPIC_API_KEY = "hub-local-proxy"
+$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8046"
+$env:ANTHROPIC_API_KEY="YOUR_KEY"
 claude
 ```
-> *Claude 3.7 Sonnet reasoning budget and thinking tokens are automatically virtualized and mapped.*
 
-### 2. Cursor & Windsurf
-1. Navigate to **Cursor Settings** → **Models** (or Windsurf Model Settings).
-2. Set **Override OpenAI Base URL** to:
-   ```
-   http://127.0.0.1:8046/v1
-   ```
-3. Enter API Key: `hub-local-proxy`.
-4. Enable models: `gemini-2.5-pro`, `gemini-2.5-flash`, `claude-3-7-sonnet`.
+**Cursor, Roo Code, Cherry Studio and other OpenAI-compatible tools**
 
-### 3. Aider (Terminal AI Pair Programmer)
-Run Aider pointing to the local proxy:
+- Base URL: `http://127.0.0.1:8046/v1`
+- API key: `YOUR_KEY`
+- Model: any id from the app's model list, or a familiar name such as `claude-3-7-sonnet`
+
+**Aider**
+
 ```powershell
-aider --openai-api-base http://127.0.0.1:8046/v1 --openai-api-key hub-local-proxy --model gemini-2.5-pro
+$env:OPENAI_API_BASE="http://127.0.0.1:8046/v1"
+$env:OPENAI_API_KEY="YOUR_KEY"
+aider --model openai/claude-3-7-sonnet
 ```
 
-### 4. Cline / Roo Code (VS Code Extension)
-1. In Cline Settings, select API Provider: **OpenAI Compatible**.
-2. **Base URL**: `http://127.0.0.1:8046/v1`
-3. **API Key**: `hub-local-proxy`
-4. **Model ID**: `gemini-2.5-pro` (or `claude-3-7-sonnet`)
+**Image generation**
 
----
+```powershell
+curl http://127.0.0.1:8046/v1/images/generations -H "Authorization: Bearer YOUR_KEY" -H "Content-Type: application/json" -d '{\"prompt\": \"a pink star on a dark background\"}'
+```
 
-## 📥 Download and Installation
+## Download and installation
 
-1. Download the Windows installer (`AI-Usage-Hub-Setup-x64.exe`) from the [Latest Release](https://github.com/Hfatih/ai-usage-hub/releases/latest).
-2. Run the installer. It installs strictly for the current Windows user without requiring administrator permissions.
-3. Launch **AI Usage Hub** and connect your existing local accounts.
-4. *(Optional)* Switch to Turkish at any time via **Settings → Language**.
+1. Download the Windows installer from the [latest release](https://github.com/Hfatih/ai-usage-hub/releases/latest).
+2. Run it. It installs for the current Windows user and does not need administrator rights.
+3. Start **AI Usage Hub**. Accounts appear once the matching tool is signed in on this PC.
+4. Turkish is available under **Settings → Language**.
 
 > [!NOTE]
-> Windows 10/11 and Microsoft Edge WebView2 (preinstalled on modern Windows) are required. Since current binaries are community-signed, Windows Defender SmartScreen may display an initial prompt. You can verify SHA-256 hashes on the Releases page.
+> Windows 10/11 and Microsoft Edge WebView2 are required. The installer is not code-signed, so Windows SmartScreen may warn on first run; each release lists a SHA-256 checksum you can compare. There is no auto-update: install a newer release over the old one.
 
----
+Upgrading from 0.1.21 or earlier: the proxy now requires an API key. Tools configured with the old placeholder key need the new key from the API Proxy page.
 
-## 🔨 Building from Source
+## Building from source
 
-### Prerequisites
-- Windows 10/11 (x64)
-- [Node.js](https://nodejs.org/) v20+
-- [Rust MSVC toolchain](https://rustup.rs/) (stable)
-- Microsoft Visual C++ Build Tools (Desktop development with C++)
+Requirements: Windows 10/11 x64, [Node.js](https://nodejs.org/) 20+, the [Rust MSVC toolchain](https://rustup.rs/) and Microsoft C++ Build Tools.
 
-### Development Mode
 ```powershell
-# Clone the repository
 git clone https://github.com/Hfatih/ai-usage-hub.git
 cd ai-usage-hub
-
-# Install dependencies
 npm ci
-
-# Start the Tauri development app
 npm run tauri dev
 ```
 
-### Production Build
-To generate a production-ready NSIS installer:
+Production installer (written to `src-tauri/target/release/bundle/nsis/`):
+
 ```powershell
 npm run tauri build
 ```
-The compiled installer will be available at:
-`src-tauri/target/release/bundle/nsis/`
 
-### Running Tests
+Tests:
+
 ```powershell
-# Run frontend unit tests
 npm test
-
-# Verify frontend production build
 npm run build
-
-# Run Rust backend test suite
 cd src-tauri
 cargo test --locked
 ```
 
----
+## Data and security
 
-## 📁 Data Storage & Security
+- **Where data lives:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`, on this PC only.
+- **No passwords:** the app never asks for or stores a Google, OpenAI or Anthropic password.
+- **Sign-in tokens:** Codex and Claude keep their own credentials; the hub stores only labels and usage for them. For Antigravity pool accounts it stores Google OAuth tokens, encrypted with Windows DPAPI for your Windows user. A copied database cannot be read under another Windows user.
+- **Exports:** an exported account JSON contains the tokens in plain text. Treat it like a password.
+- **Proxy:** listens on `127.0.0.1` only and requires the API key unless you turn that off.
+- **No telemetry:** the app talks only to the providers' own endpoints.
+- The **Security** page in the app shows what is stored and lets you clear usage history. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-- **Database Path:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`
-- **Zero Passwords:** AI Usage Hub never requests or stores raw Google or OpenAI account passwords.
-- **DPAPI Encryption:** Token secrets are encrypted with the Windows Data Protection API (DPAPI).
-- For complete vulnerability reporting procedures, see [SECURITY.md](SECURITY.md).
-
----
-
-## 📄 License & Disclaimer
+## License and disclaimer
 
 Released under the [MIT License](LICENSE).
 
-*AI Usage Hub is an independent open-source project. Google Antigravity, OpenAI ChatGPT, Anthropic Claude, Cursor, and other named products are trademarks of their respective owners.*
+AI Usage Hub is an independent open-source project and is not affiliated with Google, OpenAI or Anthropic. It relies on undocumented local and internal interfaces that can change without notice. Product names are trademarks of their respective owners.

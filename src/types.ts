@@ -106,6 +106,7 @@ export interface SecurityStatus {
   usageSnapshotCount: number;
   storedSecretCount: number;
   providerCredentialsStored: boolean;
+  secretsEncrypted: boolean;
 }
 
 export interface AntigravityQuotaDetails {
@@ -115,6 +116,8 @@ export interface AntigravityQuotaDetails {
   claude5h?: number;
   claudeWeekly?: number;
   claudeResetAt?: number;
+  geminiWeeklyResetAt?: number;
+  claudeWeeklyResetAt?: number;
 }
 
 export interface AntigravityAccount {
@@ -162,6 +165,15 @@ export interface AppSettings {
   antigravitySwitchThreshold: number;
   antigravitySwitchOnRateLimit: boolean;
   antigravitySwitchStrategy: string;
+  desktopNotifications: boolean;
+  proxyApiKey: string;
+  proxyRequireKey: boolean;
+  proxyModelMap: ModelMapRule[];
+}
+
+export interface ModelMapRule {
+  from: string;
+  to: string;
 }
 
 export interface ProxyRequestLog {
@@ -174,6 +186,13 @@ export interface ProxyRequestLog {
   latencyMs: number;
   statusCode: number;
   isStream: boolean;
+}
+
+export interface ProxyModel {
+  id: string;
+  displayName: string | null;
+  remainingPercent: number | null;
+  resetAt: number | null;
 }
 
 export interface ProxyStatus {

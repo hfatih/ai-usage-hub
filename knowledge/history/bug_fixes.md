@@ -1,5 +1,16 @@
 # Bug fix history
 
+- 2026-10-12: Security page hard-coded `stored_secret_count: 0` and said no provider secrets were stored while the Antigravity pool keeps OAuth tokens in SQLite; the count is now queried and the page describes the tokens, the keyless 127.0.0.1 proxy and exports (v0.1.21).
+- 2026-10-12: Proxy test panel and `/v1/models` listed a fixed set of outdated model names plus a non-existent `imagen-3`; the list now comes from `fetchAvailableModels` (v0.1.21).
+
+- 2026-10-12: Accounts and API Proxy pages used off-theme blue/green colours and unstyled inputs (`.search-input` and `select` had no rule); header buttons wrapped their labels; the shell tabs reused the 30px icon button class. Themed the controls, made the action row wrap, added `.segment-btn` for text tabs (v0.1.20).
+
+- 2026-10-12: Google One AI credits showed `minimumCreditAmountForUsage` (50) as the balance; the balance now comes from the language server when it reports one, otherwise from Antigravity's saved `modelCredits` state (v0.1.19).
+- 2026-10-12: Removed the fabricated "Imagen 3 & Multimodal" usage row (a copy of the Gemini 5-hour percentage) and the hard-coded "Antigravity Pro" plan label (v0.1.19).
+- 2026-10-12: Switching to an account auto-added from the live session wrote an empty token to Windows Credential Manager; such accounts are now refused, and a switch is verified against the restarted language server and rolled back if the IDE keeps the old account (v0.1.19).
+- 2026-10-12: `rate_limited` accounts stayed benched whenever Google's quota endpoint failed; the flag now clears after the known reset time, or five hours after last use (v0.1.19).
+- 2026-10-12: Antigravity network calls ran while holding the database mutex and auto-switch forced a language-server refresh every monitor tick; both now run outside the lock and reuse the 60-second provider refresh (v0.1.19).
+
 - 2026-09-24: Refresh the Windows shell icon cache after installation so desktop and Start menu shortcuts pick up the current embedded star icon.
 - 2026-09-24: Keep the burgundy account card surface during hover; the earlier hover background shorthand removed its card background and exposed the purple page underneath.
 - 2026-09-24: Restore the small pink star shapes and generate a separate unscaled star field for each card's actual size, so long Activity and Recent Alerts panels fill naturally without stretching the stars (v0.1.14).
