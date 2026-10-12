@@ -1,8 +1,10 @@
+import { Fragment } from "react";
 import { Activity, ArrowRight, Clock3, Pause, Play, ShieldCheck, Users } from "lucide-react";
 import type { PageId } from "../components/AppShell";
 import { ProviderCard } from "../components/ProviderCard";
 import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
+import { byProviderOrder, PROVIDER_INITIALS } from "../lib/providers";
 import { formatDuration, formatUsageValue, relativeTime } from "../lib/format";
 import { useHub } from "../stores/hub";
 
@@ -10,6 +12,8 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => vo
   const { language, t } = useTranslation();
   const { snapshot, accounts, loading, refresh } = useHub();
   if (loading || !snapshot) return <DashboardSkeleton />;
+  const providers = byProviderOrder(snapshot.providers, (provider) => provider.id);
+  const groupedAccounts = byProviderOrder(accounts, (account) => account.providerId);
   const running = snapshot.applications.filter((app) => app.state === "running");
   const trackedToday = snapshot.applications.reduce((total, app) => total + app.todaySeconds, 0);
 
@@ -34,11 +38,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => vo
 
       <div className="section-heading"><div><span className="eyebrow">{t("Providers")}</span><h2>{t("Everything at a glance")}</h2></div><button className="text-button" onClick={() => onNavigate("integrations")}>{t("Manage integrations")} <ArrowRight size={15} /></button></div>
       <section className="provider-grid">
-        {snapshot.providers.map((provider) => <ProviderCard key={provider.id} provider={provider} apps={snapshot.applications.filter((app) => app.providerId === provider.id)} />)}
+        {providers.map((provider) => <ProviderCard key={provider.id} provider={provider} apps={snapshot.applications.filter((app) => app.providerId === provider.id)} />)}
       </section>
       <div className="section-heading"><div><span className="eyebrow">{t("Accounts")}</span><h2>{t("Saved account usage")}</h2></div><button className="text-button" onClick={() => onNavigate("accounts")}>{t("Manage accounts")} <ArrowRight size={15} /></button></div>
       <section className="dashboard-account-list">
-        {accounts.length ? accounts.map((account) => <button key={account.id} onClick={() => onNavigate("accounts")} className="dashboard-account-row"><span className={`provider-logo provider-logo--${account.providerId}`}>{account.providerName.slice(0, 1)}</span><div><strong>{account.email}</strong><small>{account.providerName} · {account.connectionStatus === "connected" ? t("Active") : t("Last known {time}", { time: relativeTime(account.lastRefresh) })}</small></div><div className="dashboard-account-metrics">{account.usage.slice(0, 4).map((usage) => <span key={usage.metric}><strong>{formatUsageValue(usage)}</strong><small>{localizeValue(usage.label, language)}</small></span>)}</div></button>) : <div className="glass-panel empty-inline"><Users size={18} />{t("Accounts appear here after the first successful provider refresh.")}</div>}
+        {groupedAccounts.length ? groupedAccounts.map((account, index) => <Fragment key={account.id}>{groupedAccounts[index - 1]?.providerId !== account.providerId && <span className="eyebrow provider-group-title">{account.providerName}</span>}<button onClick={() => onNavigate("accounts")} className="dashboard-account-row"><span className={`provider-logo provider-logo--${account.providerId}`}>{PROVIDER_INITIALS[account.providerId] ?? account.providerName.slice(0, 1)}</span><div><strong>{account.email}</strong><small>{account.providerName} · {account.connectionStatus === "connected" ? t("Active") : t("Last known {time}", { time: relativeTime(account.lastRefresh) })}</small></div><div className="dashboard-account-metrics">{account.usage.slice(0, 4).map((usage) => <span key={usage.metric}><strong>{formatUsageValue(usage)}</strong><small>{localizeValue(usage.label, language)}</small></span>)}</div></button></Fragment>) : <div className="glass-panel empty-inline"><Users size={18} />{t("Accounts appear here after the first successful provider refresh.")}</div>}
       </section>
       <div className="privacy-footer"><ShieldCheck size={15} /><span>{t("Usage fields stay empty until a documented provider source is connected.")}</span></div>
     </>

@@ -221,7 +221,7 @@ pub fn write_system_antigravity_credential(payload: &KeyringPayload) -> Result<(
     Ok(())
 }
 
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
@@ -234,7 +234,7 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-fn base64_url_decode(input: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64_url_decode(input: &str) -> Option<Vec<u8>> {
     let mut s = input.replace('-', "+").replace('_', "/");
     while s.len() % 4 != 0 {
         s.push('=');
@@ -270,12 +270,77 @@ fn base64_url_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Checks a per-account proxy address and returns it trimmed. Only `http`, `https`, `socks5` and
+/// `socks5h` URLs with a host are accepted.
+pub fn validate_proxy_url(url: &str) -> Result<String> {
+    let url = url.trim();
+    let supported = ["http://", "https://", "socks5://", "socks5h://"]
+        .iter()
+        .any(|scheme| url.strip_prefix(scheme).is_some_and(|rest| !rest.is_empty()));
+    if !supported || reqwest::Proxy::all(url).is_err() {
+        return Err(HubError::Configuration(
+            "proxy must look like http://host:port or socks5://user:pass@host:port".into(),
+        ));
+    }
+    Ok(url.to_owned())
+}
+
+/// Builds the HTTP client for Google calls made on behalf of one pool account. With `proxy` set,
+/// all traffic goes through it and a broken proxy makes the request fail; it never falls back to
+/// a direct connection, which would expose the address the proxy is there to hide.
+pub fn http_client(proxy: Option<&str>, timeout: Duration) -> Result<Client> {
+    let mut builder = Client::builder().timeout(timeout);
+    if let Some(url) = proxy.filter(|url| !url.trim().is_empty()) {
+        let proxy = reqwest::Proxy::all(url.trim())
+            .map_err(|error| HubError::Configuration(format!("invalid account proxy: {error}")))?;
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|error| HubError::Operation(error.to_string()))
+}
+
+/// Asks Google which subscription tier an account is on (`loadCodeAssist`), preferring the paid
+/// tier over the default one. `None` when Google does not answer or reports no tier.
+pub fn fetch_google_tier(access_token: &str, proxy: Option<&str>) -> Option<String> {
+    let body: serde_json::Value = http_client(proxy, Duration::from_secs(10))
+        .ok()?
+        .post("https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")
+        .bearer_auth(access_token)
+        .header(reqwest::header::USER_AGENT, "antigravity/windows")
+        .json(&serde_json::json!({ "metadata": { "ideType": "ANTIGRAVITY" } }))
+        .send()
+        .ok()
+        .filter(|response| response.status().is_success())?
+        .json()
+        .ok()?;
+    tier_from_load_response(&body)
+}
+
+fn tier_from_load_response(body: &serde_json::Value) -> Option<String> {
+    ["paidTier", "currentTier"]
+        .iter()
+        .find_map(|key| body.pointer(&format!("/{key}/id")).and_then(|id| id.as_str()))
+        .map(str::to_owned)
+}
+
+/// Closes the Antigravity IDE: politely (window close, unsaved work can prompt) or, with `force`,
+/// by ending the whole process tree. Returns whether any Antigravity process was found.
+pub fn close_antigravity(force: bool) -> Result<bool> {
+    let mut command = std::process::Command::new("taskkill");
+    command.args(["/IM", "Antigravity.exe", "/T"]);
+    if force {
+        command.arg("/F");
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    Ok(command.output()?.status.success())
+}
+
 /// Refreshes access token via Google OAuth token endpoint
-pub fn refresh_google_oauth_token(refresh_token: &str) -> Result<TokenRefreshResponse> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| HubError::Operation(e.to_string()))?;
+pub fn refresh_google_oauth_token(refresh_token: &str, proxy: Option<&str>) -> Result<TokenRefreshResponse> {
+    let client = http_client(proxy, Duration::from_secs(15))?;
 
     let client_id = get_oauth_client_id();
     let client_secret = get_oauth_client_secret();
@@ -440,7 +505,7 @@ pub fn import_antigravity_accounts_json(database: &Mutex<Database>, json_str: &s
         .map_err(|e| HubError::Operation(format!("Invalid import JSON format: {}", e)))?;
     let mut count = 0;
     for mut acc in accounts {
-        if let Some((quota, details)) = fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref()) {
+        if let Some((quota, details)) = fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref(), acc.proxy_url.as_deref()) {
             acc.quota_remaining_percent = Some(quota);
             acc.quota_details = Some(details);
         }
@@ -465,7 +530,7 @@ pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<Antigravit
             continue;
         }
         if acc.expiry_timestamp <= now + 60 {
-            if let Ok(token_resp) = refresh_google_oauth_token(&acc.refresh_token) {
+            if let Ok(token_resp) = refresh_google_oauth_token(&acc.refresh_token, acc.proxy_url.as_deref()) {
                 acc.access_token = token_resp.access_token;
                 acc.expiry_timestamp = now + token_resp.expires_in;
                 if let Some(refresh_token) = token_resp.refresh_token {
@@ -477,7 +542,10 @@ pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<Antigravit
             }
         }
 
-        match fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref()) {
+        if let Some(tier) = fetch_google_tier(&acc.access_token, acc.proxy_url.as_deref()) {
+            acc.tier = Some(tier);
+        }
+        match fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref(), acc.proxy_url.as_deref()) {
             Some((quota, details)) => {
                 acc.quota_remaining_percent = Some(quota);
                 acc.quota_details = Some(details);
@@ -650,7 +718,7 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
             .unwrap_or_else(|| fetch_google_account_info(&cred.token.access_token));
 
         if let Some(email) = email_opt {
-            let (quota_pct, quota_details) = fetch_google_quota_summary(&cred.token.access_token, cred.token.project_id.as_deref())
+            let (quota_pct, quota_details) = fetch_google_quota_summary(&cred.token.access_token, cred.token.project_id.as_deref(), None)
                 .map(|(q, d)| (Some(q), Some(d)))
                 .unwrap_or((None, None));
 
@@ -756,6 +824,8 @@ pub fn sync_antigravity_active_session(database: &Mutex<Database>) -> Result<Ant
                 last_used: session.verified_at,
                 quota_remaining_percent: session.quota_remaining_percent,
                 quota_details: session.quota_details.clone(),
+                proxy_url: None,
+                tier: None,
             };
             let _ = lock(database)?.save_antigravity_account(&new_acc);
         }
@@ -839,8 +909,9 @@ pub fn fetch_google_account_info(access_token: &str) -> (Option<String>, Option<
 pub fn fetch_google_quota_response(
     access_token: &str,
     project_id: Option<&str>,
+    proxy: Option<&str>,
 ) -> Option<CloudCodeQuotaResponse> {
-    let client = Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
+    let client = http_client(proxy, Duration::from_secs(10)).ok()?;
     let project = project_id.unwrap_or("aicode-consumers");
 
     for url in &[
@@ -907,14 +978,15 @@ pub fn quota_details_from_usage(usage: &[UsageValue]) -> (Option<f64>, Antigravi
 pub fn fetch_google_quota_summary(
     access_token: &str,
     project_id: Option<&str>,
+    proxy: Option<&str>,
 ) -> Option<(f64, AntigravityQuotaDetails)> {
-    let (representative, details) = quota_details_from_usage(&fetch_google_usage_buckets(access_token, project_id));
+    let (representative, details) = quota_details_from_usage(&fetch_google_usage_buckets(access_token, project_id, proxy));
     Some((representative?, details))
 }
 
 /// Convert CloudCode quota response to UsageValues
-pub fn fetch_google_usage_buckets(access_token: &str, project_id: Option<&str>) -> Vec<UsageValue> {
-    fetch_google_quota_response(access_token, project_id)
+pub fn fetch_google_usage_buckets(access_token: &str, project_id: Option<&str>, proxy: Option<&str>) -> Vec<UsageValue> {
+    fetch_google_quota_response(access_token, project_id, proxy)
         .map(|summary| usage_from_quota_response(summary, Utc::now().timestamp()))
         .unwrap_or_default()
 }
@@ -1002,7 +1074,7 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
 
     // Check if token is expired or expiring within 60s
     if now >= expiry_ts - 60 {
-        if let Ok(token_resp) = refresh_google_oauth_token(&details.refresh_token) {
+        if let Ok(token_resp) = refresh_google_oauth_token(&details.refresh_token, None) {
             access_token = token_resp.access_token.clone();
             details.access_token = token_resp.access_token;
             if let Some(ref rt) = token_resp.refresh_token {
@@ -1040,7 +1112,7 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
     let email = email_opt.unwrap_or_else(|| "google_account".into());
 
     // 3. Fetch real quota percentage directly from Google CloudCode internal quota API!
-    let (mut quota_pct, mut quota_details) = match fetch_google_quota_summary(&access_token, details.project_id.as_deref()) {
+    let (mut quota_pct, mut quota_details) = match fetch_google_quota_summary(&access_token, details.project_id.as_deref(), None) {
         Some((pct, d)) => (Some(pct), Some(d)),
         None => (None, None),
     };
@@ -1072,6 +1144,8 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
         last_used: now,
         quota_remaining_percent: quota_pct,
         quota_details,
+        proxy_url: None,
+        tier: None,
     };
 
     let db = lock(database)?;
@@ -1116,7 +1190,7 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
 
     // Check if token is expired or expiring within 5 minutes
     if account.expiry_timestamp <= now + 300 {
-        match refresh_google_oauth_token(&account.refresh_token) {
+        match refresh_google_oauth_token(&account.refresh_token, account.proxy_url.as_deref()) {
             Ok(refreshed) => {
                 account.access_token = refreshed.access_token;
                 account.expiry_timestamp = now + refreshed.expires_in;
@@ -1185,7 +1259,7 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
     // 4. Update database state and refresh quota
     account.is_current = true;
     account.last_used = now;
-    if let Some((q, details)) = fetch_google_quota_summary(&account.access_token, account.project_id.as_deref()) {
+    if let Some((q, details)) = fetch_google_quota_summary(&account.access_token, account.project_id.as_deref(), account.proxy_url.as_deref()) {
         account.quota_remaining_percent = Some(q);
         account.quota_details = Some(details);
     }
@@ -1301,9 +1375,15 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
         return Ok(None);
     }
 
-    // Sort by strategy: highest health score first, or oldest last_used (round-robin)
+    // Sort by strategy: oldest last_used (round-robin), best tier first, or highest health score
     if settings.antigravity_switch_strategy == "round_robin" {
         candidates.sort_by_key(|a| a.last_used);
+    } else if settings.antigravity_switch_strategy == "tier_priority" {
+        candidates.sort_by(|a, b| {
+            crate::routing::tier_rank(a.tier.as_deref())
+                .cmp(&crate::routing::tier_rank(b.tier.as_deref()))
+                .then(b.quota_remaining_percent.unwrap_or(100.0).total_cmp(&a.quota_remaining_percent.unwrap_or(100.0)))
+        });
     } else {
         candidates.sort_by(|a, b| {
             let score_a = calculate_health_score(a.quota_remaining_percent, &a.status, a.last_used);
@@ -1335,6 +1415,18 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proxy_urls_are_validated_and_tier_prefers_the_paid_plan() {
+        assert_eq!(validate_proxy_url(" socks5://user:pw@10.0.0.2:1080 ").unwrap(), "socks5://user:pw@10.0.0.2:1080");
+        assert!(validate_proxy_url("ftp://host:21").is_err());
+        assert!(validate_proxy_url("http://").is_err());
+        assert!(http_client(Some("http://127.0.0.1:9"), Duration::from_secs(1)).is_ok());
+
+        let body = serde_json::json!({"currentTier": {"id": "free-tier"}, "paidTier": {"id": "g1-ultra-tier"}});
+        assert_eq!(tier_from_load_response(&body).as_deref(), Some("g1-ultra-tier"));
+        assert_eq!(tier_from_load_response(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn percent_encode_handles_special_characters() {
@@ -1411,6 +1503,8 @@ mod tests {
             last_used,
             quota_remaining_percent: Some(0.0),
             quota_details: reset_at.map(|reset| AntigravityQuotaDetails { gemini_reset_at: Some(reset), ..Default::default() }),
+            proxy_url: None,
+            tier: None,
         }
     }
 

@@ -134,6 +134,13 @@ export interface AntigravityAccount {
   lastUsed: number;
   quotaRemainingPercent: number | null;
   quotaDetails?: AntigravityQuotaDetails | null;
+  proxyUrl?: string | null;
+  tier?: string | null;
+}
+
+export interface CliConfigStatus {
+  claude: boolean;
+  opencode: boolean;
 }
 
 export interface AntigravityLiveSession {
@@ -169,6 +176,10 @@ export interface AppSettings {
   proxyApiKey: string;
   proxyRequireKey: boolean;
   proxyModelMap: ModelMapRule[];
+  proxyPort: number;
+  proxyTimeoutSeconds: number;
+  proxyRiskAcknowledged: boolean;
+  proxyBackgroundDowngrade: boolean;
 }
 
 export interface ModelMapRule {
