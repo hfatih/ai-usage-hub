@@ -8,8 +8,7 @@
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Sürümü İndir</a> ·
     <a href="#araçları-bağlama">Araçları bağlama</a> ·
-    <a href="#nasıl-çalışır">Nasıl çalışır</a> ·
-    <a href="#destek">Kahve Ismarla</a>
+    <a href="#nasıl-çalışır">Nasıl çalışır</a>
   </p>
 
   <p>
@@ -26,20 +25,7 @@
 
 ---
 
-## Destek
 
-Eğer **AI Usage Hub** abonelik karmaşanı çözüyor, geliştirme iş akışını hızlandırıyor veya kota kilitlenmelerini önlüyorsa, projeyi destekleyebilir ve bir kahve ısmarlayabilirsin:
-
-<div align="center">
-  <a href="https://buymeacoffee.com/hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Bana Bir Kahve Ismarla">
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/sponsors/Hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="GitHub Üzerinden Destek Ol">
-  </a>
-  <p><sub><em>Desteğin sayesinde proje tamamen bağımsız, ücretsiz ve sağlayıcı güncellemelerine karşı daima güncel kalır.</em></sub></p>
-</div>
 
 
 ## Genel bakış
