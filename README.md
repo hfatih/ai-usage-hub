@@ -8,8 +8,7 @@
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Download Release</a> ·
     <a href="#connecting-tools">Connecting tools</a> ·
-    <a href="#how-it-works">How it works</a> ·
-    <a href="#support">Buy Me a Coffee</a>
+    <a href="#how-it-works">How it works</a>
   </p>
 
   <p>
@@ -25,22 +24,6 @@
 </div>
 
 ---
-
-## Support
-
-If **AI Usage Hub** is useful to you, you can support its development:
-
-<div align="center">
-  <a href="https://buymeacoffee.com/hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee">
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/sponsors/Hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="GitHub Sponsor">
-  </a>
-  <p><sub><em>Your support keeps the project independent, free, and continuously updated with provider changes.</em></sub></p>
-</div>
-
 
 ## Overview
 
