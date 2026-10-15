@@ -70,8 +70,8 @@ export const api = {
     inTauri() ? call("toggle_antigravity_auto_switch", { enabled }) : Promise.resolve(enabled),
   getAntigravityOAuthUrl: (): Promise<string> =>
     inTauri() ? call("get_antigravity_oauth_url") : Promise.resolve("https://accounts.google.com/mock"),
-  startAntigravityOAuthLogin: (): Promise<AntigravityAccount> =>
-    inTauri() ? call("start_antigravity_oauth_login") : Promise.resolve(developmentAntigravityAccounts[0]),
+  startAntigravityOAuthLogin: (openBrowser = true): Promise<AntigravityAccount> =>
+    inTauri() ? call("start_antigravity_oauth_login", { openBrowser }) :Promise.resolve(developmentAntigravityAccounts[0]),
   completeAntigravityOAuthCode: (code: string): Promise<AntigravityAccount> =>
     inTauri() ? call("complete_antigravity_oauth_code", { code }) : Promise.resolve(developmentAntigravityAccounts[0]),
   exportAntigravityAccounts: (): Promise<string> =>

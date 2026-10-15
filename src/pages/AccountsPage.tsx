@@ -7,6 +7,7 @@ import {
   Download,
   FileJson,
   LayoutGrid,
+  Link2,
   List,
   LogIn,
   Plus,
@@ -25,7 +26,10 @@ import { byProviderOrder } from "../lib/providers";
 import { formatUsageValue, relativeTime, resetTime, shortResetTime, sourceLabel, usageProgress, usageTiming } from "../lib/format";
 import { localizeValue, useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
+import { api } from "../lib/ipc";
 import { AccountProxyButton, AntigravityProcessButtons, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
+
+const LINK_COPIED = "Sign-in link copied. Open it in any browser on this PC (Port 8045)";
 
 export function AccountsPage() {
   const { language, t } = useTranslation();
@@ -179,11 +183,11 @@ export function AccountsPage() {
     }
   }
 
-  async function handleOAuthLogin() {
+  async function handleOAuthLogin(openBrowser = true) {
     try {
       setOauthLoading(true);
-      setOauthBanner(t("Waiting for browser login... (Port 8045)"));
-      await startAntigravityOAuthLogin();
+      setOauthBanner(t(openBrowser ? "Waiting for browser login... (Port 8045)" : LINK_COPIED));
+      await startAntigravityOAuthLogin(openBrowser);
       setOauthBanner(null);
     } catch (err) {
       alert(String(err));
@@ -191,6 +195,19 @@ export function AccountsPage() {
       setOauthLoading(false);
       setOauthBanner(null);
     }
+  }
+
+  // Copies the Google sign-in link so it can be opened in another browser or profile;
+  // the localhost:8045 listener catches the callback just like the regular sign-in.
+  async function copyOAuthLink() {
+    try {
+      await navigator.clipboard.writeText(await api.getAntigravityOAuthUrl());
+    } catch (err) {
+      alert(String(err));
+      return;
+    }
+    if (oauthLoading) setOauthBanner(t(LINK_COPIED));
+    else void handleOAuthLogin(false);
   }
 
   async function handleExport() {
@@ -331,6 +348,15 @@ export function AccountsPage() {
           >
             <LogIn className={oauthLoading ? "spin" : ""} size={14} />
             {oauthLoading ? t("Waiting for browser login...") : t("Sign in with Google")}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => void copyOAuthLink()}
+            title={t("Copy sign-in link")}
+            aria-label={t("Copy sign-in link")}
+          >
+            <Link2 size={14} />
           </button>
 
           <button

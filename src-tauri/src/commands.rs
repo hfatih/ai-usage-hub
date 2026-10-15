@@ -323,15 +323,19 @@ pub fn get_antigravity_oauth_url() -> Result<String> {
 #[tauri::command(async)]
 pub fn start_antigravity_oauth_login(
     state: State<'_, HubState>,
+    open_browser: Option<bool>,
 ) -> Result<AntigravityAccount> {
     let auth_url = crate::antigravity::get_google_oauth_auth_url();
 
+    // `false` = the user copied the link to open it in a browser/profile of their choice.
     #[cfg(windows)]
-    {
+    if open_browser.unwrap_or(true) {
         let _ = std::process::Command::new("rundll32")
             .args(["url.dll,FileProtocolHandler", &auth_url])
             .spawn();
     }
+    #[cfg(not(windows))]
+    let _ = open_browser;
 
     let code = crate::antigravity::listen_for_oauth_callback(120)?;
     complete_oauth_code_internal(&state, &code)
