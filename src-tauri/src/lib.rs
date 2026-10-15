@@ -404,6 +404,8 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Must be registered first: a second launch exits and brings the running window forward.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
