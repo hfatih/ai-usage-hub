@@ -455,12 +455,24 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
                 let (status_line, body) = if code.is_some() {
                     (
                         "HTTP/1.1 200 OK",
-                        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Giriş Başarılı</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f8fafc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}div{text-align:center;padding:40px;background:#1e293b;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,0.5);border:1px solid #334155;}h2{color:#38bdf8;margin-bottom:12px;}p{color:#94a3b8;}</style></head><body><div><h2>✓ Giriş Başarılı!</h2><p>Hesabınız AI Usage Hub havuzuna eklendi.</p><p>Bu sekmeyi güvenle kapatabilirsiniz.</p></div><script>setTimeout(function(){window.close();},2000);</script></body></html>",
+                        callback_page(
+                            "✦",
+                            "Giriş Başarılı!",
+                            "Hesabınız AI Usage Hub havuzuna eklendi.",
+                            "Bu sekmeyi güvenle kapatabilirsiniz.",
+                            "<script>setTimeout(function(){window.close();},2500);</script>",
+                        ),
                     )
                 } else {
                     (
                         "HTTP/1.1 400 Bad Request",
-                        "<html><body><h2>Giriş Kodu Alınamadı</h2><p>Lütfen tekrar deneyin.</p></body></html>",
+                        callback_page(
+                            "!",
+                            "Giriş Kodu Alınamadı",
+                            "Google bir yetkilendirme kodu göndermedi.",
+                            "AI Usage Hub'a dönüp girişi tekrar deneyin.",
+                            "",
+                        ),
                     )
                 };
 
@@ -484,6 +496,17 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
             }
         }
     }
+}
+
+/// Fills the starlit page shown in the browser after the Google sign-in redirect.
+/// All arguments are fixed strings from this file, so no HTML escaping is needed.
+fn callback_page(icon: &str, title: &str, message: &str, hint: &str, script: &str) -> String {
+    include_str!("oauth_callback.html")
+        .replace("{{ICON}}", icon)
+        .replace("{{TITLE}}", title)
+        .replace("{{MESSAGE}}", message)
+        .replace("{{HINT}}", hint)
+        .replace("{{SCRIPT}}", script)
 }
 
 /// Export all Antigravity accounts from database as JSON string
@@ -1415,6 +1438,13 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_page_fills_every_placeholder() {
+        let page = callback_page("✦", "Başlık", "Mesaj", "İpucu", "");
+        assert!(page.contains("<h1>Başlık</h1>") && page.contains("İpucu"));
+        assert!(!page.contains("{{"), "unfilled placeholder left in the callback page");
+    }
 
     #[test]
     fn proxy_urls_are_validated_and_tier_prefers_the_paid_plan() {
