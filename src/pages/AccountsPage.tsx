@@ -7,6 +7,7 @@ import {
   Download,
   FileJson,
   LayoutGrid,
+  Link2,
   List,
   LogIn,
   Plus,
@@ -20,10 +21,19 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import { byProviderOrder } from "../lib/providers";
 import { formatUsageValue, relativeTime, resetTime, shortResetTime, sourceLabel, usageProgress, usageTiming } from "../lib/format";
 import { localizeValue, useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
+import { api } from "../lib/ipc";
+import { byPlatform } from "../lib/platform";
+import { AccountProxyButton, AntigravityProcessButtons, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
+
+const LINK_COPIED = byPlatform(
+  "Sign-in link copied. Open it in any browser on this PC (Port 8045)",
+  "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
+);
 
 export function AccountsPage() {
   const { language, t } = useTranslation();
@@ -49,13 +59,14 @@ export function AccountsPage() {
     syncAntigravitySession,
   } = useHub();
 
+  const groupedAccounts = byProviderOrder(accounts, (account) => account.providerId);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthBanner, setOauthBanner] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"quota" | "recent" | "email" | "status">("quota");
+  const [sortBy, setSortBy] = useState<"quota" | "recent" | "email" | "status" | "gemini" | "claude">("quota");
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [syncingSession, setSyncingSession] = useState(false);
@@ -92,27 +103,14 @@ export function AccountsPage() {
     .sort((a, b) => (b.quotaRemainingPercent ?? 0) - (a.quotaRemainingPercent ?? 0))[0]?.id;
 
   // Filtered and sorted accounts list
-  const displayedAccounts = antigravityAccounts
-    .filter((a) => {
+  const displayedAccounts = sortPoolAccounts(
+    antigravityAccounts.filter((a) => {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
       return a.email.toLowerCase().includes(q) || (a.displayName?.toLowerCase().includes(q) ?? false);
-    })
-    .sort((a, b) => {
-      if (sortBy === "quota") {
-        return (b.quotaRemainingPercent ?? 0) - (a.quotaRemainingPercent ?? 0);
-      }
-      if (sortBy === "recent") {
-        return b.lastUsed - a.lastUsed;
-      }
-      if (sortBy === "email") {
-        return a.email.localeCompare(b.email);
-      }
-      if (sortBy === "status") {
-        return a.status.localeCompare(b.status);
-      }
-      return 0;
-    });
+    }),
+    sortBy,
+  );
 
   async function handleRefreshAll() {
     try {
@@ -189,11 +187,11 @@ export function AccountsPage() {
     }
   }
 
-  async function handleOAuthLogin() {
+  async function handleOAuthLogin(openBrowser = true) {
     try {
       setOauthLoading(true);
-      setOauthBanner(t("Waiting for browser login... (Port 8045)"));
-      await startAntigravityOAuthLogin();
+      setOauthBanner(t(openBrowser ? "Waiting for browser login... (Port 8045)" : LINK_COPIED));
+      await startAntigravityOAuthLogin(openBrowser);
       setOauthBanner(null);
     } catch (err) {
       alert(String(err));
@@ -201,6 +199,19 @@ export function AccountsPage() {
       setOauthLoading(false);
       setOauthBanner(null);
     }
+  }
+
+  // Copies the Google sign-in link so it can be opened in another browser or profile;
+  // the localhost:8045 listener catches the callback just like the regular sign-in.
+  async function copyOAuthLink() {
+    try {
+      await navigator.clipboard.writeText(await api.getAntigravityOAuthUrl());
+    } catch (err) {
+      alert(String(err));
+      return;
+    }
+    if (oauthLoading) setOauthBanner(t(LINK_COPIED));
+    else void handleOAuthLogin(false);
   }
 
   async function handleExport() {
@@ -342,6 +353,15 @@ export function AccountsPage() {
             <LogIn className={oauthLoading ? "spin" : ""} size={14} />
             {oauthLoading ? t("Waiting for browser login...") : t("Sign in with Google")}
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => void copyOAuthLink()}
+            title={t("Copy sign-in link")}
+            aria-label={t("Copy sign-in link")}
+          >
+            <Link2 size={14} />
+          </button>
 
           <button
             type="button"
@@ -409,6 +429,7 @@ export function AccountsPage() {
             <RefreshCw className={syncingSession ? "spin" : ""} size={13} />
             <span>{syncingSession ? t("Syncing session...") : t("Sync & Verify Live Session")}</span>
           </button>
+          {liveSession?.isRunning && <AntigravityProcessButtons onDone={() => void handleSyncSession()} />}
         </div>
 
         <div className="live-session-content">
@@ -464,6 +485,8 @@ export function AccountsPage() {
                 style={{ width: "auto", height: 32, fontSize: 12, padding: "0 8px" }}
               >
                 <option value="quota">{t("Highest quota")}</option>
+                <option value="gemini">{t("Gemini quota")}</option>
+                <option value="claude">{t("Claude / GPT quota")}</option>
                 <option value="recent">{t("Recently used")}</option>
                 <option value="email">{t("Email (A-Z)")}</option>
                 <option value="status">{t("Status")}</option>
@@ -538,7 +561,7 @@ export function AccountsPage() {
                       )}
                     </div>
                     <strong>{account.email}</strong>
-                    <span>{account.displayName || t("Google account")}</span>
+                    <span>{[account.displayName || t("Google account"), tierLabel(account.tier)].filter(Boolean).join(" · ")}</span>
                   </div>
                   {account.isCurrent ? (
                     <span className="connection-pill connection-pill--connected" style={{ background: "rgba(219, 168, 194, 0.15)", border: "1px solid rgba(219, 168, 194, 0.4)", color: "#ffffff", fontWeight: 700 }}>
@@ -670,6 +693,7 @@ export function AccountsPage() {
                     <Clock3 size={12} />
                     {account.isCurrent ? t("Active now") : `${t("Last known snapshot")} · ${relativeTime(account.lastUsed)}`}
                   </span>
+                  <AccountProxyButton account={account} />
                   <button
                     type="button"
                     className="danger-button"
@@ -708,7 +732,7 @@ export function AccountsPage() {
                         <span className="provider-logo provider-logo--google">G</span>
                         <div>
                           <strong>{account.email}</strong>
-                          <small>{account.displayName || "Google"}</small>
+                          <small>{[account.displayName || "Google", tierLabel(account.tier)].filter(Boolean).join(" · ")}</small>
                         </div>
                         {isBest && (
                           <span className="status-badge" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#fbbf24", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
@@ -775,6 +799,7 @@ export function AccountsPage() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        <AccountProxyButton account={account} compact />
                         {!account.isCurrent && (
                           <button
                             type="button"
@@ -829,8 +854,12 @@ export function AccountsPage() {
         </div>
       ) : (
         <div className="account-grid">
-          {accounts.map((account) => (
-            <article className="glass-panel account-card" key={account.id}>
+          {groupedAccounts.map((account, index) => (
+            <Fragment key={account.id}>
+            {groupedAccounts[index - 1]?.providerId !== account.providerId && (
+              <span className="eyebrow provider-group-title">{account.providerName}</span>
+            )}
+            <article className="glass-panel account-card">
               <header>
                 <span className={`provider-logo provider-logo--${account.providerId}`}>
                   {account.providerName.slice(0, 1)}
@@ -888,6 +917,7 @@ export function AccountsPage() {
                 </button>
               </footer>
             </article>
+            </Fragment>
           ))}
         </div>
       )}

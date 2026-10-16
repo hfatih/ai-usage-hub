@@ -163,6 +163,7 @@ export function SettingsPage() {
             <select value={draft.antigravitySwitchStrategy} onChange={(e) => update("antigravitySwitchStrategy", e.target.value)}>
               <option value="highest_quota">{t("Highest available quota")}</option>
               <option value="round_robin">{t("Round-robin (least recently used)")}</option>
+              <option value="tier_priority">{t("Best plan first (Ultra, Pro, Free)")}</option>
             </select>
           </div>
         </div>

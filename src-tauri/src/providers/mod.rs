@@ -1,12 +1,18 @@
 mod anthropic;
+mod copilot;
+mod cursor;
+mod gemini_cli;
 pub(crate) mod google;
+pub(crate) mod keyed;
 mod openai;
 mod opencode;
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use crate::models::{ConnectionStatus, ProviderCapabilities, ProviderSummary, UsageValue};
@@ -126,16 +132,32 @@ fn adapters() -> Vec<Box<dyn ProviderAdapter>> {
         }),
         Box::new(GooglePlaceholder),
         Box::new(UnavailableProvider {
+            id: "gemini_cli",
+            name: "Gemini CLI",
+        }),
+        Box::new(UnavailableProvider {
             id: "opencode",
             name: "OpenCode",
         }),
         Box::new(UnavailableProvider {
             id: "kimi",
-            name: "Kimi",
+            name: keyed::name("kimi"),
         }),
         Box::new(UnavailableProvider {
             id: "github",
-            name: "GitHub",
+            name: "GitHub Copilot",
+        }),
+        Box::new(UnavailableProvider {
+            id: "cursor",
+            name: "Cursor",
+        }),
+        Box::new(UnavailableProvider {
+            id: "grok",
+            name: keyed::name("grok"),
+        }),
+        Box::new(UnavailableProvider {
+            id: "deepseek",
+            name: keyed::name("deepseek"),
         }),
     ]
 }
@@ -190,7 +212,34 @@ impl ProviderAdapter for GooglePlaceholder {
     }
 }
 
-pub fn refresh_summaries(previous: &[ProviderSummary]) -> Vec<ProviderSummary> {
+/// How long a successful answer from a remote account endpoint is reused by background refreshes.
+const REMOTE_TTL: Duration = Duration::from_secs(300);
+static REMOTE_CACHE: LazyLock<Mutex<HashMap<String, (Instant, ProviderSummary)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Runs `fetch` for a provider whose numbers come from a remote account endpoint, at most once
+/// per [`REMOTE_TTL`] unless `force` is set. Quotas and balances move slowly, so the once-a-minute
+/// background refresh does not need to call GitHub, Cursor or a billing API every time. Failures
+/// are never cached, so signing in or fixing a key shows up on the next refresh. Saving a key
+/// always forces a refresh, so an answer fetched with a replaced key is not served.
+fn throttled(provider_id: &str, force: bool, fetch: impl FnOnce() -> crate::error::Result<ProviderSummary>) -> crate::error::Result<ProviderSummary> {
+    if !force {
+        if let Some((fetched_at, summary)) = REMOTE_CACHE.lock().ok().and_then(|cache| cache.get(provider_id).cloned()) {
+            if fetched_at.elapsed() < REMOTE_TTL {
+                return Ok(summary);
+            }
+        }
+    }
+    let summary = fetch()?;
+    if let Ok(mut cache) = REMOTE_CACHE.lock() {
+        cache.insert(provider_id.to_owned(), (Instant::now(), summary.clone()));
+    }
+    Ok(summary)
+}
+
+/// Refreshes every provider. `keys` holds the API keys the user saved for key-based providers;
+/// one without a key stays "not connected" and is not contacted. `force` (a refresh the user
+/// asked for) bypasses the reuse of recent answers from remote account endpoints.
+pub fn refresh_summaries(previous: &[ProviderSummary], keys: &HashMap<String, String>, force: bool) -> Vec<ProviderSummary> {
     let mut summaries = summaries();
     replace_with_live(
         &mut summaries,
@@ -220,6 +269,38 @@ pub fn refresh_summaries(previous: &[ProviderSummary]) -> Vec<ProviderSummary> {
         "OpenCode usage unavailable",
         opencode::summary(),
     );
+    replace_with_live(
+        &mut summaries,
+        previous,
+        "gemini_cli",
+        "Gemini CLI not signed in",
+        throttled("gemini_cli", force, gemini_cli::summary),
+    );
+    replace_with_live(
+        &mut summaries,
+        previous,
+        "github",
+        "Copilot not signed in",
+        throttled("github", force, copilot::summary),
+    );
+    replace_with_live(
+        &mut summaries,
+        previous,
+        "cursor",
+        "Cursor not signed in",
+        throttled("cursor", force, cursor::summary),
+    );
+    for provider_id in keyed::KEYED_PROVIDERS {
+        if let Some(key) = keys.get(provider_id) {
+            replace_with_live(
+                &mut summaries,
+                previous,
+                provider_id,
+                "API key not accepted",
+                throttled(provider_id, force, || keyed::summary(provider_id, key)),
+            );
+        }
+    }
     summaries
 }
 

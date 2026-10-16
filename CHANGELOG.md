@@ -5,7 +5,7 @@ Rust crate, and Tauri bundle versions together.
 
 ## [Unreleased] - macOS port (`macos` branch)
 
-- Bring the `macos` branch up to 0.1.22 and port the Windows-only parts:
+- Bring the `macos` branch up to 0.1.24 and port the Windows-only parts:
   data, log and Claude/Antigravity paths under `~/Library`; app detection and
   launching through `.app` bundles; command-line tools found in Homebrew, npm
   and `~/.local/bin` folders.
@@ -13,6 +13,49 @@ Rust crate, and Tauri bundle versions together.
   the login Keychain, and switch Antigravity accounts through its Keychain item.
 - Native macOS window buttons, menu-bar hiding with Dock reopen, macOS wording
   in the interface, and `.app`/`.dmg` bundles built on macOS in CI.
+- macOS versions of the 0.1.24 Windows-only parts: Antigravity close and
+  force-close through `pkill`, Copilot sign-in from `~/.config/github-copilot`,
+  Cursor session from `~/Library/Application Support/Cursor`.
+
+## [0.1.24] - 2026-10-12
+
+- Group provider cards and saved accounts by provider, Google first, then
+  Anthropic, ChatGPT, OpenCode and the rest. They were listed in mixed order.
+- New usage sources: **Gemini CLI** (per-model quota with the CLI's own Google
+  sign-in), **GitHub Copilot** (chat, completion and premium request quotas with
+  the editor plugin's sign-in), **Cursor** (billing-cycle usage with Cursor's own
+  session), and **DeepSeek**, **Kimi / Moonshot** and **Grok / xAI** with an API
+  key pasted on the Integrations page. DeepSeek and Kimi show the account
+  balance; xAI reports no balance for a regular key, so Grok shows only whether
+  the key works.
+- The proxy now rotates pool accounts for its own requests without switching
+  the account open in the IDE. Before, a 429 or 403 on a proxy request also
+  switched the IDE and restarted its language server.
+- The proxy shows an account-risk notice once and answers 403 until it is
+  accepted. Existing installs are treated as having accepted it.
+- Proxy port and upstream timeout are configurable (port changes apply after a
+  restart).
+- Housekeeping requests from coding tools (conversation titles, next-prompt
+  suggestions) go to a Flash model whatever model they asked for; can be turned
+  off.
+- Image generation honours `size`, `quality`, `imageSize`, `n` (1-10),
+  `response_format: "url"` and model suffixes such as `-16-9-4k`.
+- Model rules accept regular expressions (`re:^gpt-4`).
+- New switch strategy "Best plan first": Ultra accounts before Pro before Free.
+  The pool shows each account's plan.
+- Per-account HTTP / SOCKS5 proxy for a pool account's Google traffic. A broken
+  proxy fails the request; it never falls back to a direct connection.
+- One-click connect and disconnect for Claude Code and OpenCode, which edits
+  the tool's own config file and keeps a `.hub-backup` copy.
+- Close and force-close buttons for the Antigravity IDE; sort the pool by Gemini
+  or Claude/GPT quota; cURL and Python request examples.
+
+## [0.1.23] - 2026-10-12
+
+- Proxy key check now fails closed: a request is refused when settings cannot
+  be read or no key is stored, and keys are compared in constant time.
+- A pool account deleted while its quota was being refreshed, or during a
+  switch, is no longer written back together with its tokens.
 
 ## [0.1.22] - 2026-10-12
 

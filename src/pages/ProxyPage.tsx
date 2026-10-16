@@ -28,6 +28,7 @@ import { useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
 import type { ModelMapRule, ProxyModel, ProxyStatus } from "../types";
 import { byPlatform } from "../lib/platform";
+import { CodeSnippetCard, ProxyAdvancedSettings, ProxyRiskGate, QuickConnectCard } from "./proxy/ProxyExtras";
 
 export function ProxyPage() {
   const { t } = useTranslation();
@@ -145,6 +146,7 @@ export function ProxyPage() {
 
   return (
     <section>
+      <ProxyRiskGate />
       <div className="page-heading">
         <div>
           <span className="eyebrow">{t("Local Gateway")}</span>
@@ -172,7 +174,7 @@ export function ProxyPage() {
           </span>
           <p>
             <strong>{baseUrl}</strong>
-            <small>{status?.running ? t("Proxy running") : t("Starting...")}</small>
+            <small>{settings && !settings.proxyRiskAcknowledged ? t("Off until you accept the notice") : status?.running ? t("Proxy running") : t("Starting...")}</small>
           </p>
         </div>
 
@@ -238,11 +240,12 @@ export function ProxyPage() {
             <span />
           </label>
         </div>
+        <ProxyAdvancedSettings />
         <div className="settings-section proxy-rules">
           <div>
             <span>
               <strong>{t("Model rules")}</strong>
-              <small>{t("Send a model name your tool asks for to the model you choose. End a name with * to match everything that starts with it.")}</small>
+              <small>{t("Send a model name your tool asks for to the model you choose. End a name with * to match everything that starts with it, or start it with re: to use a regular expression.")}</small>
             </span>
           </div>
           <div className="proxy-rule-list">
@@ -286,6 +289,8 @@ export function ProxyPage() {
       </div>
 
       <div className="integration-grid" style={{ marginBottom: 32 }}>
+        <QuickConnectCard />
+        <CodeSnippetCard baseUrl={baseUrl} apiKey={apiKey} model={liveModels[0]?.id ?? "gemini-2.5-flash"} />
         {/* CLAUDE CODE CLI */}
         <article className="glass-panel integration-card">
           <header>
@@ -701,7 +706,7 @@ export function ProxyPage() {
               </thead>
               <tbody>
                 {status.recentLogs.map((log) => {
-                  const isDowngraded = log.requestedModel.includes("haiku") && log.upstreamModel.includes("flash");
+                  const isDowngraded = log.upstreamModel.includes("flash") && !/flash|gemini/.test(log.requestedModel);
                   const dateStr = new Date(log.timestamp * 1000).toLocaleTimeString();
                   return (
                     <tr key={log.id}>
@@ -812,7 +817,7 @@ export function ProxyPage() {
           <Zap size={20} color="#f59e0b" style={{ marginBottom: 8 }} />
           <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>{t("Smart Self-Healing (429 Failover)")}</h3>
           <p style={{ margin: 0, fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
-            {t("When an account encounters a 429 rate-limit, the proxy silently rotates to the next available account in milliseconds.")}
+            {t("When an account hits a 429 rate limit, the proxy moves to the next available pool account for its own requests. The account open in the IDE is left alone.")}
           </p>
         </div>
 
