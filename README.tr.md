@@ -8,8 +8,7 @@
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Sürümü İndir</a> ·
     <a href="#araçları-bağlama">Araçları bağlama</a> ·
-    <a href="#nasıl-çalışır">Nasıl çalışır</a> ·
-    <a href="#destek">Kahve Ismarla</a>
+    <a href="#nasıl-çalışır">Nasıl çalışır</a>
   </p>
 
   <p>
@@ -25,22 +24,6 @@
 </div>
 
 ---
-
-## Destek
-
-Eğer **AI Usage Hub** abonelik karmaşanı çözüyor, geliştirme iş akışını hızlandırıyor veya kota kilitlenmelerini önlüyorsa, projeyi destekleyebilir ve bir kahve ısmarlayabilirsin:
-
-<div align="center">
-  <a href="https://buymeacoffee.com/hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Bana Bir Kahve Ismarla">
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/sponsors/Hfatih" target="_blank">
-    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="GitHub Üzerinden Destek Ol">
-  </a>
-  <p><sub><em>Desteğin sayesinde proje tamamen bağımsız, ücretsiz ve sağlayıcı güncellemelerine karşı daima güncel kalır.</em></sub></p>
-</div>
-
 
 ## Genel bakış
 
@@ -75,6 +58,11 @@ Ekran görüntüleri uygulamanın yerleşik önizleme verisiyle alınmıştır (
 - **Claude Desktop / Claude Code:** ortak 5 saatlik ve haftalık kota ile yerel token toplamları.
 - **Google Antigravity:** Gemini ve Claude/GPT kota pencereleri, Google One AI kredi bakiyesi, Antigravity'nin prompt ve flow kredileri.
 - **OpenCode:** bağlı sağlayıcılar, ücretsiz model kataloğu, yerel token ve maliyet toplamları.
+- **Gemini CLI:** model başına kalan kota, CLI'nin kendi Google oturumuyla okunur.
+- **GitHub Copilot:** sohbet, tamamlama ve premium istek kotaları, editör eklentisinin oturumuyla okunur.
+- **Cursor:** fatura dönemindeki dahil ve ek kullanım, Cursor'ın kendi oturumuyla okunur (ucun bilinen yanıt biçimine göre yazıldı; kurulu bir Cursor ile henüz denenmedi).
+- **DeepSeek, Kimi / Moonshot, Grok / xAI:** Entegrasyonlar sayfasına API anahtarı yapıştırılır. DeepSeek ve Kimi hesap bakiyesini gösterir; xAI normal anahtar için bakiye bildirmediğinden Grok yalnızca anahtarın çalışıp çalışmadığını gösterir.
+- Kartlar ve hesaplar sağlayıcıya göre gruplanır, Google en üstte.
 - Her değer *Resmi*, *Yerel*, *Hesaplandı* veya *Kullanılamıyor* olarak etiketlenir. Uygulama okuyamadığı bir sayıyı göstermez.
 - Kota belirlediğiniz eşiğin altına düştüğünde yerel uyarı, isterseniz Windows bildirimi.
 - Her yapay zekâ uygulamasının bugün ve bu hafta ne kadar açık kaldığını izler.
@@ -86,19 +74,28 @@ Ekran görüntüleri uygulamanın yerleşik önizleme verisiyle alınmıştır (
 - **Hesap geçişi:** seçilen hesabın girişini Windows Kimlik Yöneticisi'ne yazar ve Antigravity'nin dil sunucusunu yeniden başlatır. Ardından IDE'nin hangi hesabı bildirdiğine bakar; hâlâ eski hesapsa önceki girişi geri yükler ve bunu söyler.
 - **Otomatik geçiş:** etkin hesap eşiğin altına düştüğünde veya oran sınırına takıldığında sağlıklı başka bir hesaba geçer.
 - **Hesap ekleme:** tarayıcıda Google ile giriş, IDE'de açık olan hesabı yakalama veya JSON içe aktarma.
-- **Toplu silme**, arama, sıralama, kart ve liste görünümü, JSON dışa/içe aktarma.
+- **Toplu silme**, arama, sıralama (Gemini ya da Claude/GPT kotasına göre de), kart ve liste görünümü, JSON dışa/içe aktarma.
+- **Plan bilgisi:** her hesabın planını gösterir; istenirse önce Ultra, sonra Pro, sonra Free hesaplar kullanılır.
+- **Hesap başına proxy:** bir hesabın Google trafiğini kendi HTTP ya da SOCKS5 proxy'sinden geçirir. Proxy çalışmıyorsa istek doğrudan gitmez, başarısız olur.
+- Antigravity IDE'sini uygulamadan **kapatma ve zorla kapatma**.
 
 ### Yerel API proxy (`http://127.0.0.1:8046`)
 
 - **Üç API biçimi:** OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`) ve Gemini (`/v1beta/models/...:generateContent`).
-- **Görsel üretimi:** OpenAI Images biçimi (`/v1/images/generations`), sonuç `b64_json` olarak döner.
+- **Görsel üretimi:** OpenAI Images biçimi (`/v1/images/generations`); `size`, `quality`, `imageSize`, `n` (1-10) ve `response_format` (`b64_json` ya da `url`) desteklenir. Model adına eklenen `-16-9-4k` gibi bir ek de oranı ve çözünürlüğü belirler.
 - **Canlı model listesi:** `/v1/models` ve test paneli, hesabınızın gerçekten çağırabildiği modelleri Google'dan okuyarak gösterir. Gerçek model kimlikleri aynen geçer; `claude-3-7-sonnet` veya `gpt-4o` gibi tanıdık adlar güncel karşılığına eşlenir.
-- **Model kuralları:** bir aracın istediği model adını sizin seçtiğiniz modele yönlendirir (örneğin `gpt-4*` → bir Gemini modeli).
+- **Model kuralları:** bir aracın istediği model adını sizin seçtiğiniz modele yönlendirir (örneğin `gpt-4*` → bir Gemini modeli). `re:` ile başlayan kural düzenli ifade olarak okunur.
 - **API anahtarı:** proxy, uygulamada gösterilen anahtarı göndermeyen istekleri reddeder. Yalnızca `127.0.0.1` üzerinde dinler.
 - **Yedek hesaba geçiş:** 429 veya 403 yanıtında hesabı işaretler ve sıradaki sağlıklı hesapla yeniden dener.
 - **Haiku düşürme:** Haiku sınıfı model istekleri (Claude Code'un başlık üretimi gibi arka plan işleri) Claude kotasını korumak için bir Flash modeline gider.
 
-Bilinmesi gereken sınırlar: akış (streaming) yanıtları token token değil tek parça olarak iletilir ve istek başına bir görsel üretilir.
+- **Kendi rotasyonu:** proxy 429 ya da 403 alınca kendi istekleri için sıradaki sağlıklı hesaba geçer; IDE'de açık olan hesabı değiştirmez.
+- **Arka plan işleri:** sohbet başlığı ve sonraki istem önerisi istekleri, hangi modeli isterse istesin Flash modeline gider. Kapatılabilir.
+- **Port ve zaman aşımı** ayarlanabilir; yeni port yeniden başlatınca geçerli olur.
+- **Tek tıkla bağlama:** Claude Code ve OpenCode için proxy adresini ve anahtarı aracın kendi ayar dosyasına yazar, `.hub-backup` kopyası bırakır, eklediklerini geri alabilir.
+- **Risk uyarısı:** uygulamadaki uyarı kabul edilene kadar proxy isteklere 403 döner.
+
+Bilinmesi gereken sınırlar: akış (streaming) yanıtları token token değil tek parça olarak iletilir ve `n` görsel `n` ayrı istek harcar.
 
 > [!WARNING]
 > Havuzdaki Google hesaplarını yerel bir proxy üzerinden kullanmak Google'ın Kullanım Şartları'nı ihlal edebilir ve hesabın askıya alınmasına yol açabilir. Kullanım paneli proxy'ye ihtiyaç duymaz; proxy'yi kendi sorumluluğunuzda kullanın.
@@ -246,6 +243,7 @@ Bu dala yapılan her push, GitHub Actions'ta Apple Silicon için bir `.dmg` de �
 - **Parola yok:** uygulama Google, OpenAI veya Anthropic parolanızı hiçbir zaman istemez ve saklamaz.
 - **Giriş tokenları:** Codex ve Claude kimlik bilgilerini kendileri saklar; uygulama onlar için yalnızca etiket ve kullanım kaydı tutar. Antigravity havuz hesapları için Google OAuth tokenlarını, Windows kullanıcınıza özel olarak Windows DPAPI ile (macOS'ta oturum Anahtar Zinciri'ndeki bir anahtarla) şifreleyip saklar. Kopyalanan veritabanı başka bir kullanıcıda okunamaz.
 - **Dışa aktarma:** dışa aktarılan hesap JSON'u tokenları düz metin olarak içerir. Parola gibi saklayın.
+- **API anahtarları ve hesap proxy'leri:** yapıştırdığınız sağlayıcı API anahtarları ve hesap başına proxy adresleri de aynı şekilde DPAPI ile şifreli saklanır; bir anahtar yalnızca kendi sağlayıcısına gönderilir.
 - **Proxy:** yalnızca `127.0.0.1` üzerinde dinler ve siz kapatmadıkça API anahtarı ister.
 - **Telemetri yok:** uygulama yalnızca sağlayıcıların kendi uç noktalarıyla konuşur.
 - Uygulamadaki **Güvenlik** sayfası neyin saklandığını gösterir ve kullanım geçmişini temizlemenizi sağlar. Güvenlik açığı bildirmek için [SECURITY.md](SECURITY.md) dosyasına bakın.

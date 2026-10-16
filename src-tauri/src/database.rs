@@ -169,7 +169,14 @@ impl Database {
             );
             "#,
         )?;
-        let _ = self.connection.execute("ALTER TABLE antigravity_accounts ADD COLUMN quota_details_json TEXT;", []);
+        // Each ALTER fails harmlessly once its column exists.
+        for column in ["quota_details_json TEXT", "proxy_url TEXT", "tier TEXT"] {
+            let _ = self.connection.execute(&format!("ALTER TABLE antigravity_accounts ADD COLUMN {column}"), []);
+        }
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS provider_keys (provider_id TEXT PRIMARY KEY, secret TEXT NOT NULL)",
+            [],
+        )?;
         self.encrypt_legacy_tokens()?;
         // Rows written before 0.1.19 that were never real readings: the image-generation row
         // copied the Gemini percentage and the credit row held the usage threshold.
@@ -207,9 +214,13 @@ impl Database {
             ("openai", "ChatGPT / Codex"),
             ("anthropic", "Anthropic"),
             ("google", "Google / Antigravity"),
+            ("gemini_cli", "Gemini CLI"),
             ("opencode", "OpenCode"),
-            ("kimi", "Kimi"),
-            ("github", "GitHub"),
+            ("kimi", "Kimi / Moonshot"),
+            ("github", "GitHub Copilot"),
+            ("cursor", "Cursor"),
+            ("grok", "Grok / xAI"),
+            ("deepseek", "DeepSeek"),
         ] {
             tx.execute(
                 "INSERT OR IGNORE INTO providers (id, display_name) VALUES (?1, ?2)",
@@ -228,6 +239,11 @@ impl Database {
             [],
         )?;
         tx.execute("UPDATE providers SET enabled = 0 WHERE id = 'nvidia'", [])?;
+        // Names and links chosen before these providers had their own usage source.
+        tx.execute("UPDATE providers SET display_name = 'GitHub Copilot' WHERE id = 'github' AND display_name = 'GitHub'", [])?;
+        tx.execute("UPDATE providers SET display_name = 'Kimi / Moonshot' WHERE id = 'kimi' AND display_name = 'Kimi'", [])?;
+        tx.execute("UPDATE applications SET provider_id = 'gemini_cli' WHERE id = 'gemini' AND provider_id = 'google'", [])?;
+        tx.execute("UPDATE applications SET provider_id = 'cursor' WHERE id = 'cursor' AND provider_id IS NULL", [])?;
         tx.commit()?;
         Ok(())
     }
@@ -383,10 +399,10 @@ impl Database {
             return Ok(());
         };
         let account_id = format!("{}:{account_key}", provider.id);
-        let auth_method = if provider.id == "google" {
-            "official_application"
-        } else {
-            "official_cli"
+        let auth_method = match provider.id.as_str() {
+            "google" | "cursor" => "official_application",
+            "kimi" | "grok" | "deepseek" => "api_key",
+            _ => "official_cli",
         };
         tx.execute(
             "INSERT INTO accounts (id, provider_id, display_name, email_hint, plan, auth_method, connection_status, last_refresh) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, email_hint = excluded.email_hint, plan = excluded.plan, auth_method = excluded.auth_method, connection_status = excluded.connection_status, last_refresh = excluded.last_refresh",
@@ -582,7 +598,7 @@ impl Database {
             .unwrap_or(0);
         // The Antigravity pool keeps Google OAuth tokens here; report them instead of claiming none.
         let stored_secret_count: i64 = self.connection.query_row(
-            "SELECT COALESCE(SUM((access_token <> '') + (refresh_token <> '') + (COALESCE(id_token, '') <> '')), 0) FROM antigravity_accounts",
+            "SELECT COALESCE(SUM((access_token <> '') + (refresh_token <> '') + (COALESCE(id_token, '') <> '') + (COALESCE(proxy_url, '') <> '')), 0) + (SELECT COUNT(*) FROM provider_keys) FROM antigravity_accounts",
             [],
             |row| row.get(0),
         )?;
@@ -627,7 +643,7 @@ impl Database {
 
     pub fn antigravity_accounts(&self) -> Result<Vec<AntigravityAccount>> {
         let mut stmt = self.connection.prepare(
-            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json FROM antigravity_accounts ORDER BY is_current DESC, last_used DESC",
+            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json, proxy_url, tier FROM antigravity_accounts ORDER BY is_current DESC, last_used DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(AntigravityAccount {
@@ -644,6 +660,8 @@ impl Database {
                 last_used: row.get(10)?,
                 quota_remaining_percent: row.get(11)?,
                 quota_details: row.get::<_, Option<String>>(12).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
+                proxy_url: row.get::<_, Option<String>>(13)?.map(|url| crate::secret::reveal(&url)),
+                tier: row.get(14)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -651,7 +669,7 @@ impl Database {
 
     pub fn antigravity_account(&self, id: &str) -> Result<Option<AntigravityAccount>> {
         let mut stmt = self.connection.prepare(
-            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json FROM antigravity_accounts WHERE id = ?1",
+            "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json, proxy_url, tier FROM antigravity_accounts WHERE id = ?1",
         )?;
         let row = stmt.query_row([id], |row| {
             Ok(AntigravityAccount {
@@ -668,6 +686,8 @@ impl Database {
                 last_used: row.get(10)?,
                 quota_remaining_percent: row.get(11)?,
                 quota_details: row.get::<_, Option<String>>(12).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()),
+                proxy_url: row.get::<_, Option<String>>(13)?.map(|url| crate::secret::reveal(&url)),
+                tier: row.get(14)?,
             })
         }).optional()?;
         Ok(row)
@@ -680,8 +700,8 @@ impl Database {
             INSERT INTO antigravity_accounts (
                 id, email, display_name, access_token, refresh_token, id_token,
                 project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent,
-                quota_details_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                quota_details_json, proxy_url, tier
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ON CONFLICT(id) DO UPDATE SET
                 email = excluded.email,
                 display_name = COALESCE(excluded.display_name, antigravity_accounts.display_name),
@@ -694,7 +714,9 @@ impl Database {
                 is_current = excluded.is_current,
                 last_used = excluded.last_used,
                 quota_remaining_percent = COALESCE(excluded.quota_remaining_percent, antigravity_accounts.quota_remaining_percent),
-                quota_details_json = COALESCE(excluded.quota_details_json, antigravity_accounts.quota_details_json)
+                quota_details_json = COALESCE(excluded.quota_details_json, antigravity_accounts.quota_details_json),
+                proxy_url = COALESCE(excluded.proxy_url, antigravity_accounts.proxy_url),
+                tier = COALESCE(excluded.tier, antigravity_accounts.tier)
             "#,
             params![
                 account.id,
@@ -710,8 +732,51 @@ impl Database {
                 account.last_used,
                 account.quota_remaining_percent,
                 details_json,
+                account.proxy_url.as_deref().map(crate::secret::protect),
+                account.tier,
             ],
         )?;
+        Ok(())
+    }
+
+    /// Saves changes to an account only if it is still in the pool, and reports whether it was.
+    /// Callers that read an account, spend time on the network and then write it back use this
+    /// so an account deleted in the meantime is not re-created together with its tokens.
+    pub fn update_antigravity_account(&self, account: &AntigravityAccount) -> Result<bool> {
+        if self.antigravity_account(&account.id)?.is_none() {
+            return Ok(false);
+        }
+        self.save_antigravity_account(account)?;
+        Ok(true)
+    }
+
+    /// Sets or clears (`None`) the proxy an account's Google traffic goes through. Saving an
+    /// account never clears it, so this is the only way to remove one. Returns whether the
+    /// account exists.
+    pub fn set_antigravity_account_proxy(&self, id: &str, proxy_url: Option<&str>) -> Result<bool> {
+        let changed = self.connection.execute(
+            "UPDATE antigravity_accounts SET proxy_url = ?2 WHERE id = ?1",
+            params![id, proxy_url.map(crate::secret::protect)],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// API keys the user entered for key-based providers, by provider id, decrypted.
+    pub fn provider_keys(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut statement = self.connection.prepare("SELECT provider_id, secret FROM provider_keys")?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, crate::secret::reveal(&row.get::<_, String>(1)?))))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Stores a provider's API key encrypted, or removes it when `key` is `None` or blank.
+    pub fn set_provider_key(&self, provider_id: &str, key: Option<&str>) -> Result<()> {
+        match key.map(str::trim).filter(|key| !key.is_empty()) {
+            Some(key) => self.connection.execute(
+                "INSERT INTO provider_keys (provider_id, secret) VALUES (?1, ?2) ON CONFLICT(provider_id) DO UPDATE SET secret = excluded.secret",
+                params![provider_id, crate::secret::protect(key)],
+            )?,
+            None => self.connection.execute("DELETE FROM provider_keys WHERE provider_id = ?1", [provider_id])?,
+        };
         Ok(())
     }
 
@@ -955,7 +1020,7 @@ fn seed_applications() -> Vec<ApplicationDefinition> {
         ),
         (
             "gemini",
-            Some("google"),
+            Some("gemini_cli"),
             "Gemini CLI",
             &["gemini.exe", "gemini.cmd"][..],
         ),
@@ -971,7 +1036,8 @@ fn seed_applications() -> Vec<ApplicationDefinition> {
             "OpenCode",
             &["opencode.exe"][..],
         ),
-        ("cursor", None, "Cursor", &["cursor.exe"][..]),
+        ("cursor", Some("cursor"), "Cursor", &["cursor.exe"][..]),
+        ("copilot", Some("github"), "GitHub Copilot CLI", &["copilot.exe"][..]),
         (
             "vscode",
             Some("github"),
@@ -1014,6 +1080,8 @@ mod tests {
             last_used: 0,
             quota_remaining_percent: None,
             quota_details: None,
+            proxy_url: None,
+            tier: None,
         };
         database.save_antigravity_account(&account).unwrap();
         let raw: String = database
@@ -1024,6 +1092,33 @@ mod tests {
         let loaded = database.antigravity_account(&account.id).unwrap().unwrap();
         assert_eq!((loaded.access_token.as_str(), loaded.refresh_token.as_str(), loaded.id_token.as_deref()), ("access-secret", "refresh-secret", Some("id-secret")));
         assert!(database.security_status().unwrap().secrets_encrypted);
+
+        // A per-account proxy survives ordinary saves, is stored protected and is cleared on request.
+        assert!(database.set_antigravity_account_proxy(&account.id, Some("socks5://user:pw-secret@10.0.0.2:1080")).unwrap());
+        database.save_antigravity_account(&account).unwrap();
+        assert_eq!(database.antigravity_account(&account.id).unwrap().unwrap().proxy_url.as_deref(), Some("socks5://user:pw-secret@10.0.0.2:1080"));
+        let stored: String = database.connection.query_row("SELECT proxy_url FROM antigravity_accounts", [], |row| row.get(0)).unwrap();
+        assert!(!stored.contains("secret"));
+        assert!(database.set_antigravity_account_proxy(&account.id, None).unwrap());
+        assert_eq!(database.antigravity_account(&account.id).unwrap().unwrap().proxy_url, None);
+        assert!(!database.set_antigravity_account_proxy("antigravity:missing", None).unwrap());
+
+        // Provider API keys are stored protected, replaced on save and removed with a blank key.
+        database.set_provider_key("deepseek", Some(" sk-key-secret ")).unwrap();
+        let stored: String = database.connection.query_row("SELECT secret FROM provider_keys", [], |row| row.get(0)).unwrap();
+        assert!(!stored.contains("secret"));
+        assert_eq!(database.provider_keys().unwrap().get("deepseek").map(String::as_str), Some("sk-key-secret"));
+        database.set_provider_key("deepseek", Some("  ")).unwrap();
+        assert!(database.provider_keys().unwrap().is_empty());
+
+        // A stale copy written back after the account was deleted must not bring it back.
+        let mut stale = loaded.clone();
+        stale.status = "rate_limited".into();
+        assert!(database.update_antigravity_account(&stale).unwrap());
+        assert!(database.delete_antigravity_account(&account.id).unwrap());
+        assert!(!database.update_antigravity_account(&stale).unwrap());
+        assert!(database.antigravity_accounts().unwrap().is_empty());
+        database.save_antigravity_account(&account).unwrap();
 
         // A row written by an older version in plain text is upgraded by the migration.
         database.connection.execute("UPDATE antigravity_accounts SET refresh_token = 'old-plain'", []).unwrap();

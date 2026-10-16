@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
 import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
 import { isMac } from "./platform";
 
@@ -73,8 +73,8 @@ export const api = {
     inTauri() ? call("toggle_antigravity_auto_switch", { enabled }) : Promise.resolve(enabled),
   getAntigravityOAuthUrl: (): Promise<string> =>
     inTauri() ? call("get_antigravity_oauth_url") : Promise.resolve("https://accounts.google.com/mock"),
-  startAntigravityOAuthLogin: (): Promise<AntigravityAccount> =>
-    inTauri() ? call("start_antigravity_oauth_login") : Promise.resolve(developmentAntigravityAccounts[0]),
+  startAntigravityOAuthLogin: (openBrowser = true): Promise<AntigravityAccount> =>
+    inTauri() ? call("start_antigravity_oauth_login", { openBrowser }) :Promise.resolve(developmentAntigravityAccounts[0]),
   completeAntigravityOAuthCode: (code: string): Promise<AntigravityAccount> =>
     inTauri() ? call("complete_antigravity_oauth_code", { code }) : Promise.resolve(developmentAntigravityAccounts[0]),
   exportAntigravityAccounts: (): Promise<string> =>
@@ -135,4 +135,18 @@ export const api = {
       : Promise.resolve({ text: "Simulated response from mock proxy.", latencyMs: 280 }),
   clearProxyLogs: (): Promise<boolean> =>
     inTauri() ? call("clear_proxy_logs") : Promise.resolve(true),
+  setAntigravityAccountProxy: (accountId: string, proxyUrl: string): Promise<string | null> =>
+    inTauri() ? call("set_antigravity_account_proxy", { accountId, proxyUrl }) : Promise.resolve(proxyUrl || null),
+  closeAntigravity: (force: boolean): Promise<boolean> =>
+    inTauri() ? call("close_antigravity", { force }) : Promise.resolve(true),
+  acknowledgeProxyRisk: (): Promise<AppSettings> =>
+    inTauri() ? call("acknowledge_proxy_risk") : Promise.resolve({ ...developmentSettings, proxyRiskAcknowledged: true }),
+  setProviderKey: (providerId: string, key: string): Promise<DashboardSnapshot> =>
+    inTauri() ? call("set_provider_key", { providerId, key }) : Promise.resolve(structuredClone(developmentSnapshot)),
+  cliConfigStatus: (): Promise<CliConfigStatus> =>
+    inTauri() ? call("get_cli_config_status") : Promise.resolve({ claude: false, opencode: false }),
+  applyCliConfig: (tool: string): Promise<CliConfigStatus> =>
+    inTauri() ? call("apply_cli_config", { tool }) : Promise.resolve({ claude: tool === "claude", opencode: tool === "opencode" }),
+  removeCliConfig: (tool: string): Promise<CliConfigStatus> =>
+    inTauri() ? call("remove_cli_config", { tool }) : Promise.resolve({ claude: false, opencode: false }),
 };

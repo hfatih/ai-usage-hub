@@ -1,5 +1,8 @@
 # Bug fix history
 
+- 2026-10-12: Proxy authentication fell open when the settings read failed or the stored key was empty; it now returns 503/401 and uses a constant-time comparison (v0.1.23).
+- 2026-10-12: Refresh and switch paths saved an account with an upsert after an unlocked network call, re-creating an account (and its tokens) deleted in between; they now use `update_antigravity_account`, which only writes existing rows (v0.1.23).
+
 - 2026-10-12: Security page hard-coded `stored_secret_count: 0` and said no provider secrets were stored while the Antigravity pool keeps OAuth tokens in SQLite; the count is now queried and the page describes the tokens, the keyless 127.0.0.1 proxy and exports (v0.1.21).
 - 2026-10-12: Proxy test panel and `/v1/models` listed a fixed set of outdated model names plus a non-existent `imagen-3`; the list now comes from `fetchAvailableModels` (v0.1.21).
 
@@ -16,3 +19,4 @@
 - 2026-09-24: Restore the small pink star shapes and generate a separate unscaled star field for each card's actual size, so long Activity and Recent Alerts panels fill naturally without stretching the stars (v0.1.14).
 - 2026-09-24: Keep integration app rows at the bottom of grid-stretched cards so shorter providers do not leave empty space below their app section (v0.1.15).
 - 2026-09-24: Make account cards flex columns and push their footer to the bottom of the shared grid row, leaving the empty middle above the actions (v0.1.17).
+- 2026-10-12: A 429 or 403 on a proxy request called the IDE auto-switch, so using the proxy could change the account open in Antigravity and restart its language server. The proxy now only flags the account and picks the next pool account for its own requests (v0.1.24).

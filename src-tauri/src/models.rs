@@ -234,6 +234,13 @@ pub struct AntigravityAccount {
     pub quota_remaining_percent: Option<f64>,
     #[serde(default)]
     pub quota_details: Option<AntigravityQuotaDetails>,
+    /// Optional `http://`, `https://` or `socks5://` proxy every Google call for this account goes
+    /// through. Requests fail rather than fall back to a direct connection when it is unreachable.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
+    /// Subscription tier id Google reports for the account (e.g. `g1-ultra-tier`), if known.
+    #[serde(default)]
+    pub tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,10 +280,25 @@ pub struct AppSettings {
     pub proxy_api_key: String,
     pub proxy_require_key: bool,
     pub proxy_model_map: Vec<ModelMapRule>,
+    /// Port the local proxy listens on; read once at startup.
+    pub proxy_port: u16,
+    /// Seconds the proxy waits for an upstream answer before giving up.
+    pub proxy_timeout_seconds: u64,
+    /// The proxy answers 403 until the user has accepted the terms-of-service warning. Settings
+    /// saved before this field existed count as accepted so a working setup is not interrupted.
+    #[serde(default = "acknowledged")]
+    pub proxy_risk_acknowledged: bool,
+    /// Send short housekeeping requests (conversation titles and the like) to a Flash model.
+    pub proxy_background_downgrade: bool,
+}
+
+fn acknowledged() -> bool {
+    true
 }
 
 /// A user rule sending one client-side model name to a chosen upstream model. `from` is matched
-/// case-insensitively and may end with `*` to match a prefix.
+/// case-insensitively and may end with `*` to match a prefix, or start with `re:` to be read as a
+/// regular expression.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ModelMapRule {
@@ -307,6 +329,10 @@ impl Default for AppSettings {
             proxy_api_key: String::new(),
             proxy_require_key: true,
             proxy_model_map: Vec::new(),
+            proxy_port: 8046,
+            proxy_timeout_seconds: 90,
+            proxy_risk_acknowledged: false,
+            proxy_background_downgrade: true,
         }
     }
 }

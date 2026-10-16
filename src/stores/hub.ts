@@ -24,7 +24,7 @@ interface HubState {
   deleteAntigravityAccount: (accountId: string) => Promise<void>;
   switchAntigravityAccount: (accountId: string) => Promise<AntigravityAccount>;
   toggleAntigravityAutoSwitch: (enabled: boolean) => Promise<void>;
-  startAntigravityOAuthLogin: () => Promise<AntigravityAccount>;
+  startAntigravityOAuthLogin: (openBrowser?: boolean) => Promise<AntigravityAccount>;
   completeAntigravityOAuthCode: (code: string) => Promise<AntigravityAccount>;
   exportAntigravityAccounts: () => Promise<string>;
   importAntigravityAccounts: (jsonData: string) => Promise<number>;
@@ -104,8 +104,8 @@ export const useHub = create<HubState>((set, get) => ({
     const settings = await api.settings();
     set({ settings });
   },
-  startAntigravityOAuthLogin: async () => {
-    const acc = await api.startAntigravityOAuthLogin();
+  startAntigravityOAuthLogin: async (openBrowser) => {
+    const acc = await api.startAntigravityOAuthLogin(openBrowser);
     const antigravityAccounts = await api.antigravityAccounts();
     set({ antigravityAccounts });
     get().refresh().catch(() => {});

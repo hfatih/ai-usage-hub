@@ -8,7 +8,9 @@ mod keychain;
 mod models;
 pub mod proxy;
 pub mod platform;
+mod cli_config;
 mod providers;
+mod routing;
 mod secret;
 
 use std::{
@@ -96,13 +98,13 @@ fn refresh_providers(state: &HubState, force: bool) -> Result<bool> {
             .read()
             .map_err(|_| HubError::Operation("provider lock is unavailable".into()))?
             .clone();
-        let refreshed = providers::refresh_summaries(&previous);
-        for provider in refreshed.iter().filter(|provider| {
-            matches!(
-                provider.id.as_str(),
-                "openai" | "anthropic" | "google" | "opencode"
-            )
-        }) {
+        let keys = state
+            .database
+            .lock()
+            .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+            .provider_keys()?;
+        let refreshed = providers::refresh_summaries(&previous, &keys, force);
+        for provider in &refreshed {
             if provider.error.is_none() {
                 if let Ok(mut database) = state.database.lock() {
                     if let Err(error) = database.save_provider_snapshot(provider) {
@@ -113,6 +115,10 @@ fn refresh_providers(state: &HubState, force: bool) -> Result<bool> {
                 if provider.id == "google" {
                     let _ = antigravity::sync_antigravity_active_session(&state.database);
                 }
+            } else if !matches!(provider.id.as_str(), "openai" | "anthropic" | "google" | "opencode")
+                && !matches!(provider.connection_status, models::ConnectionStatus::Connected)
+            {
+                // An optional provider that is not set up on this PC is not a failure to report.
             } else if let Ok(database) = state.database.lock() {
                 if let Err(error) = database.record_provider_error(provider) {
                     tracing::warn!(%error, "could not persist provider error notification");
@@ -402,6 +408,8 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Must be registered first: a second launch exits and brings the running window forward.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -427,12 +435,15 @@ pub fn run() {
             };
             app.manage(HubState::new(database));
             let state = app.state::<HubState>();
+            let mut proxy_port = proxy::DEFAULT_PROXY_PORT;
             if let Ok(db) = state.database.lock() {
                 if let Ok(mut settings) = db.settings() {
                     if settings.proxy_api_key.is_empty() {
                         settings.proxy_api_key = proxy::generate_api_key();
                         let _ = db.save_settings(&settings);
                     }
+                    proxy::set_proxy_options(settings.proxy_timeout_seconds, settings.proxy_background_downgrade);
+                    proxy_port = settings.proxy_port;
                     proxy::set_model_map(settings.proxy_model_map);
                 }
             }
@@ -449,7 +460,7 @@ pub fn run() {
                 }
             }
             start_monitor(app.handle().clone());
-            proxy::start_proxy_server(app.handle().clone(), proxy::DEFAULT_PROXY_PORT);
+            proxy::start_proxy_server(app.handle().clone(), proxy_port);
             tracing::info!("Setup completed successfully!");
             Ok(())
         })
@@ -507,6 +518,13 @@ pub fn run() {
             commands::get_proxy_models,
             commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
+            commands::set_antigravity_account_proxy,
+            commands::close_antigravity,
+            commands::acknowledge_proxy_risk,
+            commands::set_provider_key,
+            commands::get_cli_config_status,
+            commands::apply_cli_config,
+            commands::remove_cli_config,
         ])
         .build(tauri::generate_context!())
         .expect("AI Usage Hub failed to start")
