@@ -87,7 +87,7 @@ export const api = {
       ? call("get_antigravity_live_session")
       : Promise.resolve({
           isRunning: true,
-          email: "primary.dev@gmail.com",
+          email: "primary.dev@example.com",
           name: "Fatih",
           plan: "Google AI Pro",
           source: "LanguageServer (Mock)",
@@ -101,7 +101,7 @@ export const api = {
       ? call("sync_antigravity_session")
       : Promise.resolve({
           isRunning: true,
-          email: "primary.dev@gmail.com",
+          email: "primary.dev@example.com",
           name: "Fatih",
           plan: "Google AI Pro",
           source: "LanguageServer (Mock)",
@@ -120,7 +120,7 @@ export const api = {
           successRequests: 0,
           failedRequests: 0,
           lastLatencyMs: 0,
-          activeAccountEmail: "mock@gmail.com",
+          activeAccountEmail: "mock@example.com",
         }),
   regenerateProxyApiKey: (): Promise<AppSettings> =>
     inTauri() ? call("regenerate_proxy_api_key") : Promise.resolve({ ...developmentSettings, proxyApiKey: "sk-hub-preview-" + Date.now().toString(16) }),

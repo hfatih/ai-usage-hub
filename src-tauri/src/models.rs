@@ -215,6 +215,29 @@ pub struct AntigravityQuotaDetails {
     pub claude_reset_at: Option<i64>,
     pub gemini_weekly_reset_at: Option<i64>,
     pub claude_weekly_reset_at: Option<i64>,
+    /// Gemini 4 Argon weekly allowance left, in percent. Only the running Antigravity app reports
+    /// it (Google's quota endpoints do not), so it is filled while the account is the active one
+    /// and kept afterwards; `argon_read_at` says how old it is.
+    #[serde(default)]
+    pub argon_weekly: Option<f64>,
+    #[serde(default)]
+    pub argon_weekly_reset_at: Option<i64>,
+    #[serde(default)]
+    pub argon_read_at: Option<i64>,
+}
+
+impl AntigravityQuotaDetails {
+    /// Copies the Argon reading from `previous` when this (fresher) reading has none, so a
+    /// Google-side refresh does not erase what the app reported earlier.
+    pub fn keep_argon_from(&mut self, previous: Option<&AntigravityQuotaDetails>) {
+        if self.argon_weekly.is_none() {
+            if let Some(previous) = previous {
+                self.argon_weekly = previous.argon_weekly;
+                self.argon_weekly_reset_at = previous.argon_weekly_reset_at;
+                self.argon_read_at = previous.argon_read_at;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

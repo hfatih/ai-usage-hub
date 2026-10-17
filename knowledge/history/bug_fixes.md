@@ -1,5 +1,7 @@
 # Bug fix history
 
+- 2026-10-17: Antigravity account switch never completed. (1) Antigravity 2.24 reads its sign-in from `~/.gemini/jetski-standalone-oauth-token`, not Windows Credential Manager, so the restarted language server came back as the old account; the credential read/write functions now use that file first. (2) Credential Manager refused the payload with "not enough memory" (os error 8); that write is now best-effort when the token file was written, and drops `id_token` above the 2560-byte blob limit. (3) The switch and auto-switch activity events passed a pool id as `account_id`, which references `accounts`, so `PRAGMA foreign_keys` rejected them and the command returned an error after switching; they now pass `None`. Step timings are logged as `switch: …`.
+
 - 2026-10-12: Proxy authentication fell open when the settings read failed or the stored key was empty; it now returns 503/401 and uses a constant-time comparison (v0.1.23).
 - 2026-10-12: Refresh and switch paths saved an account with an upsert after an unlocked network call, re-creating an account (and its tokens) deleted in between; they now use `update_antigravity_account`, which only writes existing rows (v0.1.23).
 
