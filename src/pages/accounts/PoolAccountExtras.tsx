@@ -1,9 +1,39 @@
 import { Globe, Power } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "../../i18n";
+import { relativeTime, resetTime, shortResetTime } from "../../lib/format";
 import { api } from "../../lib/ipc";
 import { useHub } from "../../stores/hub";
 import type { AntigravityAccount } from "../../types";
+
+/**
+ * Gemini 4 Argon weekly allowance. Only the running Antigravity app reports it, so for an account
+ * that is not active the value is the last reading and the chip says how old it is.
+ */
+export function ArgonQuotaChip({ account }: { account: AntigravityAccount }) {
+  const { t } = useTranslation();
+  const details = account.quotaDetails;
+  const value = details?.argonWeekly;
+  const resetAt = details?.argonWeeklyResetAt;
+  const stale = !account.isCurrent && details?.argonReadAt;
+  const title = value == null
+    ? t("Argon quota is read from Antigravity while this account is the active one.")
+    : [resetAt ? resetTime(resetAt) : null, stale ? `${t("Last read")} · ${relativeTime(details!.argonReadAt!)}` : null].filter(Boolean).join(" · ") || undefined;
+  return (
+    <div className="model-quota-chip model-quota-chip--wide" title={title}>
+      <div className="model-quota-chip-header">
+        <span className="model-quota-label">Gemini 4 Argon W</span>
+        <strong className="model-quota-val">{value != null ? `${Math.round(value)}%` : "—"}</strong>
+      </div>
+      {(resetAt && value != null && value < 100) || stale ? (
+        <span className="model-quota-reset">
+          {resetAt && value != null && value < 100 ? `🕒 ${shortResetTime(resetAt)}` : null}
+          {stale ? ` · ${t("Last read")} ${relativeTime(details!.argonReadAt!)}` : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 /** Short plan name for a Google tier id such as `g1-ultra-tier`; null when the tier is unknown. */
 export function tierLabel(tier: string | null | undefined): string | null {

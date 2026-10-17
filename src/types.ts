@@ -118,6 +118,9 @@ export interface AntigravityQuotaDetails {
   claudeResetAt?: number;
   geminiWeeklyResetAt?: number;
   claudeWeeklyResetAt?: number;
+  argonWeekly?: number;
+  argonWeeklyResetAt?: number;
+  argonReadAt?: number;
 }
 
 export interface AntigravityAccount {
