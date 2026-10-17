@@ -694,7 +694,18 @@ impl Database {
     }
 
     pub fn save_antigravity_account(&self, account: &AntigravityAccount) -> Result<()> {
-        let details_json = account.quota_details.as_ref().and_then(|d| serde_json::to_string(d).ok());
+        let mut details = account.quota_details.clone();
+        if let Some(details) = details.as_mut() {
+            // Google's quota endpoints never report Argon; keep what the app reported earlier.
+            let stored: Option<String> = self
+                .connection
+                .query_row("SELECT quota_details_json FROM antigravity_accounts WHERE id = ?1", [&account.id], |row| row.get(0))
+                .optional()?
+                .flatten();
+            let previous = stored.and_then(|raw| serde_json::from_str::<crate::models::AntigravityQuotaDetails>(&raw).ok());
+            details.keep_argon_from(previous.as_ref());
+        }
+        let details_json = details.as_ref().and_then(|d| serde_json::to_string(d).ok());
         self.connection.execute(
             r#"
             INSERT INTO antigravity_accounts (
@@ -1062,6 +1073,28 @@ fn seed_applications() -> Vec<ApplicationDefinition> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pool_switch_events_record_without_an_accounts_row_and_argon_survives_a_resave() {
+        use crate::models::{AntigravityAccount, AntigravityQuotaDetails, Severity};
+        let database = super::Database::memory().unwrap();
+        // Pool ids are not `accounts` rows; passing one trips the foreign key (the old switch bug).
+        assert!(database.record_activity_event("antigravity_switch", Some("antigravity:a@example.com"), "t", None, Severity::Success, 1).is_err());
+        database.record_activity_event("antigravity_switch", None, "Switched Antigravity to a@example.com", None, Severity::Success, 1).unwrap();
+
+        let mut account = AntigravityAccount {
+            id: "antigravity:a@example.com".into(), email: "a@example.com".into(), display_name: None,
+            access_token: String::new(), refresh_token: String::new(), id_token: None, project_id: None,
+            expiry_timestamp: 0, status: "healthy".into(), is_current: false, last_used: 0, quota_remaining_percent: None,
+            quota_details: Some(AntigravityQuotaDetails { argon_weekly: Some(9.0), argon_read_at: Some(5), ..Default::default() }),
+            proxy_url: None, tier: None,
+        };
+        database.save_antigravity_account(&account).unwrap();
+        account.quota_details = Some(AntigravityQuotaDetails { gemini_5h: Some(100.0), ..Default::default() });
+        database.save_antigravity_account(&account).unwrap();
+        let details = database.antigravity_account(&account.id).unwrap().unwrap().quota_details.unwrap();
+        assert_eq!((details.gemini_5h, details.argon_weekly, details.argon_read_at), (Some(100.0), Some(9.0), Some(5)));
+    }
+
     #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn pool_tokens_are_encrypted_at_rest_and_legacy_rows_are_upgraded() {

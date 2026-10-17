@@ -95,14 +95,14 @@ export const developmentSettings: AppSettings = {
   proxyModelMap: [{ from: "gpt-4*", to: "gemini-3.6-flash-high" }],
   proxyPort: 8046,
   proxyTimeoutSeconds: 90,
-  proxyRiskAcknowledged: false,
+  proxyRiskAcknowledged: true,
   proxyBackgroundDowngrade: true,
 };
 
 export const developmentAntigravityAccounts: AntigravityAccount[] = [
   {
     id: "dev-antigravity-1",
-    email: "primary.dev@gmail.com",
+    email: "primary.dev@example.com",
     displayName: "Primary Developer",
     accessToken: "mock_token_1",
     refreshToken: "mock_refresh_1",
@@ -118,11 +118,14 @@ export const developmentAntigravityAccounts: AntigravityAccount[] = [
       geminiWeekly: 74,
       claude5h: 92,
       claudeWeekly: 65,
+      argonWeekly: 62,
+      argonWeeklyResetAt: Math.floor(Date.now() / 1000) + 5 * 86400,
+      argonReadAt: Math.floor(Date.now() / 1000),
     },
   },
   {
     id: "dev-antigravity-2",
-    email: "secondary.backup@gmail.com",
+    email: "secondary.backup@example.com",
     displayName: "Secondary Backup",
     accessToken: "mock_token_2",
     refreshToken: "mock_refresh_2",
@@ -138,6 +141,8 @@ export const developmentAntigravityAccounts: AntigravityAccount[] = [
       geminiWeekly: 90,
       claude5h: 100,
       claudeWeekly: 85,
+      argonWeekly: 100,
+      argonReadAt: Math.floor(Date.now() / 1000) - 86400,
     },
   },
 ];

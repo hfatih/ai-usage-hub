@@ -101,6 +101,9 @@ const en: Record<string, string> = {
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your macOS account.": "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your macOS account.",
   "Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this Mac and sent only to their own provider.": "Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this Mac and sent only to their own provider.",
   "Sign-in link copied. Open it in any browser on this Mac (Port 8045)": "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
+  "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon Weekly Limit",
+  "Argon quota is read from Antigravity while this account is the active one.": "Argon quota is read from Antigravity while this account is the active one.",
+  "Last read": "Last read",
 };
 
 export default en;

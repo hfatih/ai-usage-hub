@@ -101,6 +101,9 @@ const tr: Record<string, string> = {
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your macOS account.": "{count} giriş token'ı, API anahtarı ve hesap proxy'si ({accounts} Antigravity havuz hesabı), macOS hesabınız için şifreli.",
   "Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this Mac and sent only to their own provider.": "Yerel uygulamaların oturumları yerinde okunur, kopyalanmaz. Buraya yapıştırdığın API anahtarları bu Mac'te şifreli saklanır ve yalnızca kendi sağlayıcısına gönderilir.",
   "Sign-in link copied. Open it in any browser on this Mac (Port 8045)": "Giriş linki kopyalandı. Bu Mac'teki herhangi bir tarayıcıda açın (Port 8045)",
+  "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon haftalık limit",
+  "Argon quota is read from Antigravity while this account is the active one.": "Argon kotası, bu hesap Antigravity'de etkin olduğu sırada okunur.",
+  "Last read": "Son okuma",
 };
 
 export default tr;
