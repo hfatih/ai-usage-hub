@@ -12,6 +12,7 @@ mod cli_config;
 mod providers;
 mod routing;
 mod secret;
+mod updater;
 
 use std::{
     fs,
@@ -504,6 +505,8 @@ pub fn run() {
             commands::delete_antigravity_account,
             commands::switch_antigravity_account,
             commands::toggle_antigravity_auto_switch,
+            commands::check_for_update,
+            commands::install_update,
             commands::get_antigravity_oauth_url,
             commands::start_antigravity_oauth_login,
             commands::complete_antigravity_oauth_code,

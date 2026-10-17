@@ -1,7 +1,11 @@
 # Releasing AI Usage Hub
 
 Each user-facing update gets a version bump, changelog entry, source commit,
-Git tag, and GitHub Release. There is no in-app auto updater yet.
+Git tag, and GitHub Release. The app's **Update** button reads the latest
+GitHub Release, so every release must attach the NSIS installer with a name
+ending in `-setup.exe` and a `SHA256SUMS.txt` listing its hash
+(`<sha256> *<file name>`). Without a matching checksum the app refuses to run
+the download. The tag (`vX.Y.Z`) must be newer than the installed version.
 
 1. Update the same version in `package.json`, `package-lock.json`,
    `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`.
