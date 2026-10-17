@@ -3,6 +3,20 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [Unreleased] - macOS port (`macos` branch)
+
+- Bring the `macos` branch up to 0.1.25 and port the Windows-only parts:
+  data, log and Claude/Antigravity paths under `~/Library`; app detection and
+  launching through `.app` bundles; command-line tools found in Homebrew, npm
+  and `~/.local/bin` folders.
+- Encrypt Antigravity pool tokens with ChaCha20-Poly1305 under a key kept in
+  the login Keychain, and switch Antigravity accounts through its Keychain item.
+- Native macOS window buttons, menu-bar hiding with Dock reopen, macOS wording
+  in the interface, and `.app`/`.dmg` bundles built on macOS in CI.
+- macOS versions of the 0.1.24 Windows-only parts: Antigravity close and
+  force-close through `pkill`, Copilot sign-in from `~/.config/github-copilot`,
+  Cursor session from `~/Library/Application Support/Cursor`.
+
 ## [0.1.25] - 2026-10-17
 
 - **Update button:** when GitHub has a newer release, the top bar offers it.

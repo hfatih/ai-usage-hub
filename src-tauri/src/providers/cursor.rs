@@ -3,7 +3,7 @@
 //! from its known response shape without a Cursor install to test against, so rows carry medium
 //! confidence and a response in another shape yields no rows instead of guessed ones.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
@@ -79,7 +79,7 @@ pub fn capabilities() -> ProviderCapabilities {
 }
 
 fn state_database() -> Option<Connection> {
-    let path = PathBuf::from(std::env::var_os("APPDATA")?).join("Cursor/User/globalStorage/state.vscdb");
+    let path = crate::platform::app_data_dir()?.join("Cursor/User/globalStorage/state.vscdb");
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
 }
 

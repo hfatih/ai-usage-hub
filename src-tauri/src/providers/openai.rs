@@ -209,11 +209,11 @@ fn to_usage(window: &RateLimitWindow, fallback: &str, now: i64) -> UsageValue {
 }
 
 fn recent_codex_tokens(now: i64) -> i64 {
-    let Some(home) = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME")) else {
+    let Some(home) = crate::platform::home_dir() else {
         return 0;
     };
     let cutoff = now.saturating_sub(86_400);
-    super::recent_jsonl_files(&PathBuf::from(home).join(".codex/sessions"), cutoff)
+    super::recent_jsonl_files(&home.join(".codex/sessions"), cutoff)
         .into_iter()
         .filter_map(|path| fs::File::open(path).ok())
         .map(BufReader::new)
@@ -315,6 +315,17 @@ fn codex_candidates() -> Vec<PathBuf> {
         }
     }
 
+    // The macOS Codex app ships its own CLI inside the bundle; Homebrew and npm installs live in
+    // folders a Finder-launched app does not have on its PATH.
+    let mut bundled = Vec::new();
+    if cfg!(target_os = "macos") {
+        bundled.push(PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"));
+        if let Some(home) = crate::platform::home_dir() {
+            bundled.push(home.join("Applications/Codex.app/Contents/Resources/codex"));
+        }
+    }
+    bundled.extend(crate::platform::extra_bin_dirs().into_iter().map(|dir| dir.join("codex")));
+    candidates.extend(bundled.into_iter().filter(|path| path.is_file()));
     candidates.push(PathBuf::from("codex"));
     candidates.dedup();
     candidates

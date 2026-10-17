@@ -2,8 +2,9 @@
 //!
 //! `check` compares the latest published release with the running version. `install` downloads
 //! the Windows setup EXE, refuses it unless its SHA-256 matches the release's `SHA256SUMS.txt`,
-//! starts it and lets the caller exit so the installer can replace the files. On other systems it
-//! opens the release page, because an unsigned macOS bundle has to be installed by hand.
+//! starts it and lets the caller exit so the installer can replace the files. On macOS an update is
+//! offered only when the release carries a `.dmg`, and installing opens the release page, because
+//! an unsigned bundle has to be installed by hand.
 
 use std::{io::Read, path::PathBuf, time::Duration};
 
@@ -24,7 +25,8 @@ pub struct UpdateInfo {
     pub latest_version: String,
     pub available: bool,
     pub release_url: String,
-    /// The installer for this system; `None` when the release has none (macOS installs by hand).
+    /// The installer for this system (`-setup.exe` on Windows, `.dmg` on macOS); `None` when the
+    /// release has none.
     pub installer_name: Option<String>,
     #[serde(skip)]
     installer_url: Option<String>,
@@ -64,21 +66,24 @@ pub fn check() -> Result<UpdateInfo> {
         .map_err(operation)?
         .json()
         .map_err(operation)?;
-    Ok(info_from_release(release, env!("CARGO_PKG_VERSION")))
+    Ok(info_from_release(release, env!("CARGO_PKG_VERSION"), cfg!(windows)))
 }
 
-fn info_from_release(release: Release, current: &str) -> UpdateInfo {
+/// `windows` picks the installer to look for. Elsewhere a release without a `.dmg` is not offered
+/// at all: it holds only the Windows build, so pointing a Mac at it would be no update.
+fn info_from_release(release: Release, current: &str, windows: bool) -> UpdateInfo {
     let latest = release.tag_name.trim_start_matches('v').to_owned();
+    let suffix = if windows { "-setup.exe" } else { ".dmg" };
     let installer = release
         .assets
         .iter()
-        .find(|asset| asset.name.ends_with("-setup.exe") && is_release_download(&asset.browser_download_url));
+        .find(|asset| asset.name.ends_with(suffix) && is_release_download(&asset.browser_download_url));
     let checksums = release
         .assets
         .iter()
         .find(|asset| asset.name == CHECKSUMS_ASSET && is_release_download(&asset.browser_download_url));
     UpdateInfo {
-        available: is_newer(&latest, current),
+        available: is_newer(&latest, current) && (windows || installer.is_some()),
         current_version: current.to_owned(),
         latest_version: latest,
         release_url: release.html_url,
@@ -173,8 +178,7 @@ fn update_dir() -> Result<PathBuf> {
 }
 
 fn open_in_browser(url: &str) -> Result<()> {
-    let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(program).arg(url).spawn()?;
+    crate::platform::open_url(url)?;
     Ok(())
 }
 
@@ -206,6 +210,26 @@ mod tests {
     }
 
     #[test]
+    fn macs_are_offered_only_releases_with_a_dmg() {
+        let release = |assets: &[&str]| Release {
+            tag_name: "v0.1.30".into(),
+            html_url: "https://github.com/hfatih/ai-usage-hub/releases/tag/v0.1.30".into(),
+            assets: assets
+                .iter()
+                .map(|name| Asset {
+                    name: (*name).into(),
+                    browser_download_url: format!("https://github.com/{REPOSITORY}/releases/download/v0.1.30/{name}"),
+                })
+                .collect(),
+        };
+        let windows_only = info_from_release(release(&["AI-Usage-Hub_0.1.30_x64-setup.exe"]), "0.1.24", false);
+        assert!(!windows_only.available);
+        let with_dmg = info_from_release(release(&["AI-Usage-Hub_0.1.30_x64-setup.exe", "AI-Usage-Hub_0.1.30_aarch64.dmg"]), "0.1.24", false);
+        assert!(with_dmg.available);
+        assert_eq!(with_dmg.installer_name.as_deref(), Some("AI-Usage-Hub_0.1.30_aarch64.dmg"));
+    }
+
+    #[test]
     fn only_this_repository_assets_are_offered() {
         let release = Release {
             tag_name: "v0.1.30".into(),
@@ -215,7 +239,7 @@ mod tests {
                 Asset { name: "SHA256SUMS.txt".into(), browser_download_url: format!("https://github.com/{REPOSITORY}/releases/download/v0.1.30/SHA256SUMS.txt") },
             ],
         };
-        let info = info_from_release(release, "0.1.24");
+        let info = info_from_release(release, "0.1.24", true);
         assert!(info.available);
         assert_eq!(info.installer_name, None);
         assert!(info.checksums_url.is_some());
