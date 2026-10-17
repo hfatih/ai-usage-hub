@@ -2,13 +2,15 @@ import { Download } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../i18n";
 import { api, type UpdateInfo } from "../lib/ipc";
+import { byPlatform } from "../lib/platform";
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Shown in the top bar only when GitHub has a newer release. Installing downloads the setup EXE,
  * checks it against the release's SHA256SUMS.txt and runs it; the app then closes for the
- * installer (on macOS the release page opens instead).
+ * installer (on macOS, where an update is offered only when the release has a .dmg, the release
+ * page opens instead).
  */
 export function UpdateButton() {
   const { t } = useTranslation();
@@ -25,7 +27,7 @@ export function UpdateButton() {
   if (!update?.available) return null;
 
   async function install() {
-    if (!update || !window.confirm(t("Install AI Usage Hub {version}? The app closes while the installer runs.", { version: update.latestVersion }))) return;
+    if (!update || !window.confirm(t(byPlatform("Install AI Usage Hub {version}? The app closes while the installer runs.", "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one."), { version: update.latestVersion }))) return;
     try {
       setInstalling(true);
       await api.installUpdate();
@@ -45,7 +47,7 @@ export function UpdateButton() {
       title={t("Version {version} is available on GitHub", { version: update.latestVersion })}
     >
       <Download size={14} className={installing ? "spin" : ""} />
-      {installing ? t("Downloading update...") : t("Update to {version}", { version: update.latestVersion })}
+      {installing ? t(byPlatform("Downloading update...", "Opening download page...")) : t("Update to {version}", { version: update.latestVersion })}
     </button>
   );
 }

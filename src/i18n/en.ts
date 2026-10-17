@@ -108,6 +108,7 @@ const en: Record<string, string> = {
   "Version {version} is available on GitHub": "Version {version} is available on GitHub",
   "Downloading update...": "Downloading update...",
   "Update to {version}": "Update to {version}",
+  "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one.": "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one.", "Opening download page...": "Opening download page...",
 };
 
 export default en;

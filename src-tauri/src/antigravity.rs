@@ -320,9 +320,28 @@ fn write_standalone_token_file(payload: &KeyringPayload) -> Result<bool> {
     let existing = std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str(&raw).ok());
     let value = standalone_from_payload(existing, payload);
     let temp = path.with_extension("hub-tmp");
-    std::fs::write(&temp, serde_json::to_vec(&value).map_err(|e| HubError::Operation(e.to_string()))?)?;
+    write_private(&temp, &serde_json::to_vec(&value).map_err(|e| HubError::Operation(e.to_string()))?)?;
     std::fs::rename(&temp, &path)?;
     Ok(true)
+}
+
+/// Writes a file only the current user can read. The token file holds a Google refresh token, and
+/// on macOS a plain write would leave it readable by every account on the computer (mode 0644).
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        // A leftover temp file keeps its old mode on open, so tighten it explicitly too.
+        let mut file = options.open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        return file.write_all(bytes);
+    }
+    #[cfg(not(unix))]
+    options.open(path)?.write_all(bytes)
 }
 
 fn standalone_from_payload(existing: Option<serde_json::Value>, payload: &KeyringPayload) -> serde_json::Value {
@@ -1597,6 +1616,19 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn token_file_is_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("token");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        super::write_private(&path, b"{\"token\":{}}").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"token\":{}}");
+    }
+
     use super::*;
 
     #[test]
