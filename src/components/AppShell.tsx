@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useHub } from "../stores/hub";
 import { localizeValue, useTranslation } from "../i18n";
+import { UpdateButton } from "./UpdateButton";
 
 export type PageId = "dashboard" | "accounts" | "proxy" | "apps" | "usage" | "activity" | "notifications" | "integrations" | "security" | "settings";
 
@@ -67,6 +68,7 @@ export function AppShell({ page, onPageChange, children }: Props) {
             <span>{t(navItems.find((item) => item.id === page)?.label ?? "Dashboard")}</span>
           </div>
           <div className="topbar-actions">
+            <UpdateButton />
             <button className="icon-button" aria-label={t("Refresh all")} title={t("Refresh all")} onClick={() => void refresh()} disabled={refreshing}>
               <RefreshCw size={18} className={refreshing ? "spin" : ""} />
             </button>

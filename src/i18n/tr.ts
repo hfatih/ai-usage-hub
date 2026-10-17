@@ -100,6 +100,10 @@ const tr: Record<string, string> = {
   "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon haftalık limit",
   "Argon quota is read from Antigravity while this account is the active one.": "Argon kotası, bu hesap Antigravity'de etkin olduğu sırada okunur.",
   "Last read": "Son okuma",
+  "Install AI Usage Hub {version}? The app closes while the installer runs.": "AI Usage Hub {version} kurulsun mu? Kurulum sırasında uygulama kapanır.",
+  "Version {version} is available on GitHub": "{version} sürümü GitHub'da yayınlandı",
+  "Downloading update...": "Güncelleme indiriliyor...",
+  "Update to {version}": "{version} sürümüne güncelle",
 };
 
 export default tr;
