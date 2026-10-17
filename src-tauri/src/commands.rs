@@ -328,6 +328,20 @@ pub fn toggle_antigravity_auto_switch(
     Ok(enabled)
 }
 
+#[tauri::command(async)]
+pub fn check_for_update() -> Result<crate::updater::UpdateInfo> {
+    crate::updater::check()
+}
+
+/// Starts the verified installer and exits so it can replace the running files.
+#[tauri::command(async)]
+pub fn install_update(app: tauri::AppHandle) -> Result<()> {
+    if crate::updater::install()? {
+        app.exit(0);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_antigravity_oauth_url() -> Result<String> {
     Ok(crate::antigravity::get_google_oauth_auth_url())

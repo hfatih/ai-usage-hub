@@ -11,7 +11,20 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   return invoke<T>(command, args);
 }
 
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  releaseUrl: string;
+  installerName: string | null;
+}
+
 export const api = {
+  checkForUpdate: (): Promise<UpdateInfo> =>
+    inTauri()
+      ? call("check_for_update")
+      : Promise.resolve({ currentVersion: "0.1.24", latestVersion: "0.1.24", available: false, releaseUrl: "", installerName: null }),
+  installUpdate: (): Promise<void> => call("install_update"),
   dashboard: (): Promise<DashboardSnapshot> =>
     inTauri() ? call("get_dashboard") : Promise.resolve(structuredClone(developmentSnapshot)),
   refresh: (): Promise<DashboardSnapshot> =>

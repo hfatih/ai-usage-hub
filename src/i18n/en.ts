@@ -104,6 +104,10 @@ const en: Record<string, string> = {
   "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon Weekly Limit",
   "Argon quota is read from Antigravity while this account is the active one.": "Argon quota is read from Antigravity while this account is the active one.",
   "Last read": "Last read",
+  "Install AI Usage Hub {version}? The app closes while the installer runs.": "Install AI Usage Hub {version}? The app closes while the installer runs.",
+  "Version {version} is available on GitHub": "Version {version} is available on GitHub",
+  "Downloading update...": "Downloading update...",
+  "Update to {version}": "Update to {version}",
 };
 
 export default en;
