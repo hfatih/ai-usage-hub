@@ -3,6 +3,27 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [0.1.25] - 2026-10-17
+
+- **Update button:** when GitHub has a newer release, the top bar offers it.
+  The installer is downloaded only from this repository's releases, checked
+  against `SHA256SUMS.txt`, and started; the app closes while it runs.
+- **Antigravity 2.24:** account switching works again. The new Antigravity
+  app keeps its sign-in in `~/.gemini/jetski-standalone-oauth-token`; switching
+  now writes there and restarts its language server. A database constraint
+  also made every switch (and auto-switch) report an error after it had
+  already switched; fixed.
+- **Gemini 4 Argon:** the separate Argon weekly allowance and its reset time
+  are shown on each pool account. Antigravity reports it only for the signed-in
+  account, so other accounts show their last reading and when it was taken.
+- **Copy sign-in link:** a small link button next to "Sign in with Google"
+  copies the Google sign-in address to open it in any browser or profile on
+  this PC. The page shown after signing in matches the app's look.
+- Opening the app while it is already running brings the open window forward
+  instead of starting a second copy.
+- Rose-burgundy backdrop, bars, scrollbars, menus and switches replace the
+  remaining purple and grey.
+
 ## [0.1.24] - 2026-10-12
 
 - Group provider cards and saved accounts by provider, Google first, then
