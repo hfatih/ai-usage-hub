@@ -987,3 +987,5 @@ select option { color: var(--text); background: #1f1018; }
 .proxy-rule-list > .proxy-rule-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .proxy-rule-actions button { height: 34px; }
 .select-box { flex: 0 0 auto; width: 15px; height: 15px; margin: 0; accent-color: #e7a0b9; cursor: pointer; }
+
+.update-button { height: 34px; padding: 0 13px; font-size: 11px; }
