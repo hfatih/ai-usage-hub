@@ -108,6 +108,7 @@ const tr: Record<string, string> = {
   "Version {version} is available on GitHub": "{version} sürümü GitHub'da yayınlandı",
   "Downloading update...": "Güncelleme indiriliyor...",
   "Update to {version}": "{version} sürümüne güncelle",
+  "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one.": "AI Usage Hub {version} indirme sayfası açılsın mı? Uygulamalar klasöründeki uygulamayı yenisiyle değiştirin.", "Opening download page...": "İndirme sayfası açılıyor...",
 };
 
 export default tr;
