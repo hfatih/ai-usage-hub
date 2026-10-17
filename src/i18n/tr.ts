@@ -97,6 +97,9 @@ const tr: Record<string, string> = {
   "operation failed: Open Cursor and sign in to read Cursor usage": "Cursor kullanımını okumak için Cursor'ı aç ve giriş yap",
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your Windows account.": "{count} giriş token'ı, API anahtarı ve hesap proxy'si ({accounts} Antigravity havuz hesabı), Windows hesabınız için şifreli.",
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts); some tokens are unencrypted in this database.": "{count} giriş token'ı, API anahtarı ve hesap proxy'si ({accounts} Antigravity havuz hesabı); bazı token'lar bu veritabanında şifresiz.",
+  "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon haftalık limit",
+  "Argon quota is read from Antigravity while this account is the active one.": "Argon kotası, bu hesap Antigravity'de etkin olduğu sırada okunur.",
+  "Last read": "Son okuma",
 };
 
 export default tr;

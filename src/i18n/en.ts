@@ -97,6 +97,9 @@ const en: Record<string, string> = {
   "operation failed: Open Cursor and sign in to read Cursor usage": "operation failed: Open Cursor and sign in to read Cursor usage",
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your Windows account.": "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts), encrypted for your Windows account.",
   "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts); some tokens are unencrypted in this database.": "{count} sign-in tokens, API keys and account proxies ({accounts} Antigravity pool accounts); some tokens are unencrypted in this database.",
+  "Gemini 4 Argon Weekly Limit": "Gemini 4 Argon Weekly Limit",
+  "Argon quota is read from Antigravity while this account is the active one.": "Argon quota is read from Antigravity while this account is the active one.",
+  "Last read": "Last read",
 };
 
 export default en;

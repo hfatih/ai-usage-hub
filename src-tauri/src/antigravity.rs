@@ -197,8 +197,12 @@ mod win_cred {
     }
 }
 
-/// Read active Antigravity credential payload from Windows Credential Manager
+/// Read the active Antigravity sign-in: the standalone app's token file (Antigravity 2.24+)
+/// when present, otherwise the IDE's entry in Windows Credential Manager.
 pub fn read_system_antigravity_credential() -> Result<Option<KeyringPayload>> {
+    if let Some(payload) = read_standalone_token_file()? {
+        return Ok(Some(payload));
+    }
     let raw = win_cred::read_credential(TARGET_CREDENTIAL)
         .map_err(|e| HubError::Operation(format!("Credential read failed: {}", e)))?;
 
@@ -211,14 +215,104 @@ pub fn read_system_antigravity_credential() -> Result<Option<KeyringPayload>> {
     Ok(Some(payload))
 }
 
-/// Write Antigravity credential payload to Windows Credential Manager
+/// Write an Antigravity sign-in where both flavours read it: the standalone app's token file
+/// (only when `~/.gemini` exists) and the IDE's entry in Windows Credential Manager.
+/// A failed IDE entry is only an error when the token file was not written either.
 pub fn write_system_antigravity_credential(payload: &KeyringPayload) -> Result<()> {
-    let json = serde_json::to_string(payload)
+    let wrote_file = write_standalone_token_file(payload)?;
+    let mut json = serde_json::to_string(payload)
         .map_err(|e| HubError::Operation(format!("Credential serialization failed: {}", e)))?;
+    if json.len() > CREDENTIAL_BLOB_LIMIT {
+        // Windows refuses generic credentials over 2560 bytes ("not enough memory"); the
+        // id_token is the optional bulk, and Antigravity fetches a new one on refresh.
+        let mut slim = payload.clone();
+        slim.token.id_token = None;
+        json = serde_json::to_string(&slim)
+            .map_err(|e| HubError::Operation(format!("Credential serialization failed: {}", e)))?;
+    }
 
-    win_cred::write_credential(TARGET_CREDENTIAL, TARGET_USERNAME, json.as_bytes())
-        .map_err(|e| HubError::Operation(format!("Credential write failed: {}", e)))?;
-    Ok(())
+    let stored = win_cred::write_credential(TARGET_CREDENTIAL, TARGET_USERNAME, json.as_bytes())
+        .map_err(|e| HubError::Operation(format!("Credential write failed: {}", e)));
+    match stored {
+        Err(error) if wrote_file => {
+            tracing::warn!(%error, "Antigravity IDE credential not updated; the standalone token file was");
+            Ok(())
+        }
+        other => other,
+    }
+}
+
+/// Largest blob Windows Credential Manager accepts for a generic credential.
+const CREDENTIAL_BLOB_LIMIT: usize = 2560;
+
+/// `~/.gemini`, where the standalone Antigravity app (2.24+) keeps its data and sign-in.
+fn gemini_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(|home| std::path::PathBuf::from(home).join(".gemini"))
+}
+
+/// The standalone app's sign-in file. Its language server reads it at start, so a switch writes
+/// it and restarts the server. Same fields as the IDE credential, except `id_token` sits at the
+/// top level instead of inside `token`.
+fn standalone_token_path() -> Option<std::path::PathBuf> {
+    gemini_home().map(|dir| dir.join("jetski-standalone-oauth-token"))
+}
+
+fn read_standalone_token_file() -> Result<Option<KeyringPayload>> {
+    let Some(path) = standalone_token_path().filter(|path| path.is_file()) else {
+        return Ok(None);
+    };
+    let content = std::fs::read_to_string(&path)?;
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| HubError::Operation(format!("Antigravity token file is not valid JSON: {e}")))?;
+    Ok(Some(payload_from_standalone(&value)?))
+}
+
+fn payload_from_standalone(value: &serde_json::Value) -> Result<KeyringPayload> {
+    let mut token: KeyringTokenDetails = serde_json::from_value(value["token"].clone())
+        .map_err(|e| HubError::Operation(format!("Antigravity token file has an unexpected shape: {e}")))?;
+    if token.id_token.is_none() {
+        token.id_token = value["id_token"].as_str().map(str::to_owned);
+    }
+    Ok(KeyringPayload {
+        token,
+        auth_method: value["auth_method"].as_str().unwrap_or("consumer").to_owned(),
+    })
+}
+
+/// Updates the known fields of the token file and keeps any others the app may have added.
+/// Writes through a temporary file so a crash never leaves a half-written sign-in behind.
+/// Does nothing and returns `false` when `~/.gemini` does not exist (standalone app never installed).
+fn write_standalone_token_file(payload: &KeyringPayload) -> Result<bool> {
+    let Some(path) = standalone_token_path().filter(|path| path.parent().is_some_and(|dir| dir.is_dir())) else {
+        return Ok(false);
+    };
+    let existing = std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str(&raw).ok());
+    let value = standalone_from_payload(existing, payload);
+    let temp = path.with_extension("hub-tmp");
+    std::fs::write(&temp, serde_json::to_vec(&value).map_err(|e| HubError::Operation(e.to_string()))?)?;
+    std::fs::rename(&temp, &path)?;
+    Ok(true)
+}
+
+fn standalone_from_payload(existing: Option<serde_json::Value>, payload: &KeyringPayload) -> serde_json::Value {
+    let mut value = existing.filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+    let mut token = value["token"].as_object().cloned().unwrap_or_default();
+    token.insert("access_token".into(), payload.token.access_token.clone().into());
+    token.insert("token_type".into(), payload.token.token_type.clone().into());
+    token.insert("refresh_token".into(), payload.token.refresh_token.clone().into());
+    token.insert("expiry".into(), payload.token.expiry.clone().into());
+    value["token"] = token.into();
+    value["auth_method"] = payload.auth_method.clone().into();
+    match &payload.token.id_token {
+        Some(id_token) => value["id_token"] = id_token.clone().into(),
+        None => {
+            // A stale id_token would name the previous account.
+            value.as_object_mut().map(|object| object.remove("id_token"));
+        }
+    }
+    value
 }
 
 pub(crate) fn percent_encode(s: &str) -> String {
@@ -975,7 +1069,14 @@ pub fn quota_details_from_usage(usage: &[UsageValue]) -> (Option<f64>, Antigravi
     for row in usage {
         let Some(value) = row.value else { continue };
         let metric = row.metric.to_ascii_lowercase();
-        if metric.contains("gemini-5h") || metric.contains("gemini_5h") {
+        if metric.contains("argon") {
+            // Gemini 4 Argon has its own weekly allowance (bucket `gemini-argon-wtu-weekly`).
+            if metric.contains("weekly") {
+                details.argon_weekly = Some(value);
+                details.argon_weekly_reset_at = row.reset_at;
+                details.argon_read_at = Some(row.retrieved_at);
+            }
+        } else if metric.contains("gemini-5h") || metric.contains("gemini_5h") {
             details.gemini_5h = Some(value);
             details.gemini_reset_at = row.reset_at;
         } else if metric.contains("gemini-weekly") || metric.contains("gemini_weekly") {
@@ -1084,7 +1185,7 @@ pub fn kill_antigravity_language_servers() -> usize {
 /// Capture current account from Windows Credential Manager, UserInfo, and Google CloudCode APIs
 pub fn capture_current_account(database: &Mutex<Database>) -> Result<AntigravityAccount> {
     let cred = read_system_antigravity_credential()?
-        .ok_or_else(|| HubError::Operation("No Antigravity credential found in Windows Credential Manager. Please sign in to Antigravity first.".into()))?;
+        .ok_or_else(|| HubError::Operation("No Antigravity sign-in found on this PC. Please sign in to Antigravity first.".into()))?;
 
     let now = Utc::now().timestamp();
     let mut details = cred.token;
@@ -1198,6 +1299,7 @@ fn wait_for_live_email(timeout: Duration) -> Option<String> {
 /// which account it reports; if it is still the old one, the previous credential is restored
 /// and an error is returned. Can block for up to ~15 s; the database lock is not held meanwhile.
 pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result<AntigravityAccount> {
+    tracing::info!(account_id, "switch: requested");
     let mut account = lock(database)?
         .antigravity_account(account_id)?
         .ok_or_else(|| HubError::Operation(format!("Account {} not found", account_id)))?;
@@ -1255,16 +1357,21 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
             .map_or_else(|| "consumer".into(), |credential| credential.auth_method.clone()),
     };
 
-    // 1. Write to Windows Credential Store
+    // 1. Write the sign-in where Antigravity reads it
+    let started = std::time::Instant::now();
     write_system_antigravity_credential(&payload)?;
+    tracing::info!(account = %account.email, "switch: sign-in written");
 
     // 2. Hot switch: kill running language server so Antigravity picks up new account
     let killed = kill_antigravity_language_servers();
+    tracing::info!(killed, "switch: language server stopped");
 
     // 3. Verify the IDE really came back as the new account
     let mut outcome = "Antigravity was not running; the account applies on its next start.".to_string();
     if killed > 0 {
-        match wait_for_live_email(Duration::from_secs(15)) {
+        let live = wait_for_live_email(Duration::from_secs(15));
+        tracing::info!(live = ?live, elapsed_ms = started.elapsed().as_millis() as u64, "switch: language server answered");
+        match live {
             Some(live_email) if !live_email.eq_ignore_ascii_case(&account.email) => {
                 if let Some(previous) = &previous {
                     let _ = write_system_antigravity_credential(previous);
@@ -1286,6 +1393,7 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
         account.quota_remaining_percent = Some(q);
         account.quota_details = Some(details);
     }
+    tracing::info!(elapsed_ms = started.elapsed().as_millis() as u64, "switch: quota fetched, waiting for database");
     let db = lock(database)?;
     if !db.update_antigravity_account(&account)? {
         return Err(HubError::Operation(format!(
@@ -1298,13 +1406,14 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
     // 5. Record activity event
     db.record_activity_event(
         "antigravity_switch",
-        Some(&account.id),
+        None, // `account_id` references `accounts`; pool ids live in `antigravity_accounts`.
         &format!("Switched Antigravity to {}", account.email),
         Some(&outcome),
         Severity::Success,
         now,
     )?;
     drop(db);
+    tracing::info!(elapsed_ms = started.elapsed().as_millis() as u64, "switch: finished");
 
     Ok(account)
 }
@@ -1422,7 +1531,7 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
     let now = Utc::now().timestamp();
     db.record_activity_event(
         "antigravity_auto_switch",
-        Some(&switched.id),
+        None, // `account_id` references `accounts`; pool ids live in `antigravity_accounts`.
         &format!("Auto-switched Antigravity to {}", switched.email),
         Some(&format!(
             "Quota fell below {}% (measured: {:?}%). Automatically rotated from {}.",
@@ -1438,6 +1547,53 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_token_file_round_trips_and_keeps_unknown_fields() {
+        let existing = serde_json::json!({
+            "token": { "access_token": "old", "token_type": "Bearer", "refresh_token": "old-r", "expiry": "x", "extra": 1 },
+            "auth_method": "consumer", "id_token": "old-id", "future_field": true
+        });
+        let payload = KeyringPayload {
+            token: KeyringTokenDetails {
+                access_token: "new".into(), token_type: "Bearer".into(), refresh_token: "new-r".into(),
+                expiry: "2026-10-17T00:00:00Z".into(), id_token: Some("new-id".into()), project_id: None,
+            },
+            auth_method: "consumer".into(),
+        };
+        let written = standalone_from_payload(Some(existing), &payload);
+        assert_eq!(written["id_token"], "new-id");
+        assert_eq!(written["token"]["refresh_token"], "new-r");
+        assert_eq!(written["token"]["extra"], 1);
+        assert_eq!(written["future_field"], true);
+        assert!(written["token"].get("id_token").is_none(), "id_token belongs at the top level");
+        let read_back = payload_from_standalone(&written).unwrap();
+        assert_eq!(read_back.token.access_token, "new");
+        assert_eq!(read_back.token.id_token.as_deref(), Some("new-id"));
+
+        let without_id = KeyringPayload { token: KeyringTokenDetails { id_token: None, ..payload.token.clone() }, ..payload };
+        assert!(standalone_from_payload(Some(written), &without_id).get("id_token").is_none());
+    }
+
+    #[test]
+    fn argon_bucket_fills_its_own_fields_and_survives_a_google_refresh() {
+        let row = |metric: &str, value: f64, reset: i64| UsageValue {
+            metric: metric.into(), label: String::new(), value: Some(value), max_value: Some(100.0),
+            unit: "% remaining".into(), source: UsageSource::LocalApplication, confidence: Confidence::High,
+            retrieved_at: 50, reset_at: Some(reset),
+        };
+        let (_, live) = quota_details_from_usage(&[
+            row("antigravity_gemini-weekly_remaining", 80.0, 1),
+            row("antigravity_gemini-argon-wtu-weekly_remaining", 0.0, 99),
+        ]);
+        assert_eq!(live.gemini_weekly, Some(80.0), "the Argon bucket must not overwrite Gemini weekly");
+        assert_eq!((live.argon_weekly, live.argon_weekly_reset_at, live.argon_read_at), (Some(0.0), Some(99), Some(50)));
+
+        let (_, mut from_google) = quota_details_from_usage(&[row("antigravity_gemini-5h_remaining", 100.0, 2)]);
+        from_google.keep_argon_from(Some(&live));
+        assert_eq!(from_google.argon_weekly, Some(0.0));
+        assert_eq!(from_google.gemini_5h, Some(100.0));
+    }
 
     #[test]
     fn callback_page_fills_every_placeholder() {
