@@ -21,6 +21,14 @@
     <img src="https://img.shields.io/badge/Telemetri-Sıfır%20%2F%20%25100%20Yerel-10B981?style=flat-square" alt="Sıfır Telemetri">
     <img src="https://img.shields.io/badge/Lisans-MIT-blue?style=flat-square" alt="MIT Lisansı">
   </p>
+  <p align="center">
+    <img src="https://hits.sh/github.com/hfatih/ai-usage-hub.svg?style=flat-square&label=g%C3%B6r%C3%BCnt%C3%BClenme&color=e7a0b9" alt="Views">
+    <a href="https://github.com/hfatih/ai-usage-hub/releases"><img src="https://img.shields.io/github/downloads/hfatih/ai-usage-hub/total?style=flat-square&label=indirme&color=f0abc5" alt="Downloads"></a>
+    <a href="https://github.com/hfatih/ai-usage-hub/releases/latest"><img src="https://img.shields.io/github/v/release/hfatih/ai-usage-hub?style=flat-square&label=s%C3%BCr%C3%BCm&color=dba8c2" alt="Release"></a>
+    <a href="https://github.com/hfatih/ai-usage-hub/stargazers"><img src="https://img.shields.io/github/stars/hfatih/ai-usage-hub?style=flat-square&label=y%C4%B1ld%C4%B1z&color=f0abc5" alt="Stars"></a>
+    <a href="https://github.com/hfatih/ai-usage-hub/forks"><img src="https://img.shields.io/github/forks/hfatih/ai-usage-hub?style=flat-square&label=fork&color=dba8c2" alt="Forks"></a>
+    <a href="https://github.com/hfatih/ai-usage-hub/commits"><img src="https://img.shields.io/github/last-commit/hfatih/ai-usage-hub?style=flat-square&label=son%20commit&color=bca4dd" alt="Last commit"></a>
+  </p>
 </div>
 
 ---
