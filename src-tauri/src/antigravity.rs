@@ -528,23 +528,12 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
 
         match listener.accept() {
             Ok((mut stream, _)) => {
-                use std::io::{Read, Write};
-                let mut buffer = [0u8; 4096];
-                let read_bytes = stream.read(&mut buffer).unwrap_or(0);
-                let request = String::from_utf8_lossy(&buffer[..read_bytes]);
-
-                let code = request.lines().next().and_then(|line| {
-                    let path = line.split_whitespace().nth(1)?;
-                    let query = path.split_once('?')?.1;
-                    query.split('&').find_map(|param| {
-                        let (k, v) = param.split_once('=')?;
-                        if k == "code" {
-                            Some(v.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                });
+                use std::io::Write;
+                let request_line = read_request_line(&mut stream);
+                let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+                let code = query_param(target, "code").filter(|code| !code.is_empty());
+                // The user pressed "Cancel" on Google's consent screen: stop waiting right away.
+                let denied = query_param(target, "error");
 
                 let (status_line, body) = if code.is_some() {
                     (
@@ -581,6 +570,9 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
                 if let Some(c) = code {
                     return Ok(c);
                 }
+                if let Some(error) = denied {
+                    return Err(HubError::Operation(format!("Google sign-in was not completed: {error}")));
+                }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(100));
@@ -590,6 +582,77 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
             }
         }
     }
+}
+
+/// Reads the first line of an HTTP request from a freshly accepted connection. The socket is put
+/// back into blocking mode with a short timeout first: on Windows it inherits the listener's
+/// non-blocking mode, and a read that runs before the browser has sent anything (a preconnect)
+/// would otherwise come back empty and lose the sign-in code.
+fn read_request_line(stream: &mut std::net::TcpStream) -> String {
+    use std::io::Read;
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 2048];
+    while !buffer.contains(&b'\n') && buffer.len() < 16 * 1024 {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+        }
+    }
+    String::from_utf8_lossy(&buffer).lines().next().unwrap_or_default().to_owned()
+}
+
+/// Decodes `%XX` escapes and `+` (space) in a URL query value.
+pub(crate) fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 3 <= bytes.len() => {
+                match std::str::from_utf8(&bytes[index + 1..index + 3]).ok().and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                    Some(byte) => {
+                        out.push(byte);
+                        index += 3;
+                        continue;
+                    }
+                    None => out.push(b'%'),
+                }
+            }
+            b'+' => out.push(b' '),
+            byte => out.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The decoded value of `key` in the query string of a request target or full URL.
+fn query_param(target: &str, key: &str) -> Option<String> {
+    let query = target.split_once('?')?.1;
+    let query = query.split('#').next().unwrap_or(query);
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        (name == key).then(|| percent_decode(value))
+    })
+}
+
+/// Accepts what a user pastes after signing in by hand: the bare code (as shown or still
+/// URL-encoded), or the whole `http://localhost:8045/auth/callback?code=...` address.
+pub fn extract_oauth_code(input: &str) -> Result<String> {
+    let input = input.trim();
+    let code = if input.contains("code=") {
+        let target = if input.contains('?') { input.to_owned() } else { format!("?{input}") };
+        query_param(&target, "code").unwrap_or_default()
+    } else {
+        percent_decode(input)
+    };
+    let code = code.trim().to_owned();
+    if code.is_empty() {
+        return Err(HubError::Configuration("paste the code (or the whole address) Google redirected to".into()));
+    }
+    Ok(code)
 }
 
 /// Fills the starlit page shown in the browser after the Google sign-in redirect.
@@ -616,20 +679,106 @@ fn lock(database: &Mutex<Database>) -> Result<MutexGuard<'_, Database>> {
         .map_err(|_| HubError::Operation("database lock is unavailable".into()))
 }
 
-/// Import Antigravity accounts from JSON string, refresh quota and health, save to DB
+/// Pool id of the account signed in as `email`.
+pub fn account_id(email: &str) -> String {
+    format!("antigravity:{}", email.trim().to_lowercase())
+}
+
+/// Builds a pool account from a Google refresh token: renews the access token, asks Google whose
+/// account it is and reads its quota. `email_hint` is only used when Google does not say; an
+/// account whose email cannot be determined is refused rather than saved under a made-up name.
+pub fn account_from_refresh_token(email_hint: &str, refresh_token: &str, proxy: Option<&str>) -> Result<AntigravityAccount> {
+    let refresh_token = refresh_token.trim();
+    if refresh_token.is_empty() {
+        return Err(HubError::Configuration("the refresh token is empty".into()));
+    }
+    let token = refresh_google_oauth_token(refresh_token, proxy)?;
+    let now = Utc::now().timestamp();
+    let claims = token.id_token.as_deref().and_then(parse_jwt_claims);
+    let (info_email, info_name) = fetch_google_account_info(&token.access_token);
+    let email = info_email
+        .or_else(|| claims.as_ref().map(|(email, _)| email.clone()))
+        .or_else(|| Some(email_hint.trim().to_owned()).filter(|email| !email.is_empty()))
+        .ok_or_else(|| HubError::Operation("Google did not report the account's email; enter it and try again".into()))?;
+    let (quota_pct, quota_details) = fetch_google_quota_summary(&token.access_token, None, proxy)
+        .map(|(quota, details)| (Some(quota), Some(details)))
+        .unwrap_or((None, None));
+    Ok(AntigravityAccount {
+        id: account_id(&email),
+        email,
+        display_name: info_name.or_else(|| claims.and_then(|(_, name)| name)),
+        access_token: token.access_token,
+        refresh_token: token.refresh_token.unwrap_or_else(|| refresh_token.to_owned()),
+        id_token: token.id_token,
+        project_id: None,
+        expiry_timestamp: now + token.expires_in,
+        status: if quota_pct.is_some_and(|q| q <= 0.0) { "rate_limited".into() } else { "healthy".into() },
+        is_current: false,
+        last_used: now,
+        quota_remaining_percent: quota_pct,
+        quota_details,
+        proxy_url: proxy.map(str::to_owned),
+        tier: None,
+    })
+}
+
+/// Imports pool accounts from JSON: either the hub's own export (full account objects) or a
+/// minimal list of `{ "email": ..., "refresh_token": ... }` entries, as the import dialog
+/// suggests. A single object is accepted as a one-entry list. Entries that cannot be imported are
+/// skipped and logged; if none can be, the first problem is returned as the error.
 pub fn import_antigravity_accounts_json(database: &Mutex<Database>, json_str: &str) -> Result<usize> {
-    let accounts: Vec<AntigravityAccount> = serde_json::from_str(json_str)
+    let value: serde_json::Value = serde_json::from_str(json_str.trim_start_matches('\u{feff}'))
         .map_err(|e| HubError::Operation(format!("Invalid import JSON format: {}", e)))?;
+    let entries = match value {
+        serde_json::Value::Array(entries) => entries,
+        object @ serde_json::Value::Object(_) => vec![object],
+        _ => return Err(HubError::Operation("Invalid import JSON format: expected a list of accounts".into())),
+    };
     let mut count = 0;
-    for mut acc in accounts {
+    let mut first_error = None;
+    for (index, entry) in entries.into_iter().enumerate() {
+        match import_entry(&entry) {
+            Ok(mut acc) => {
+                let db = lock(database)?;
+                db.merge_existing_antigravity_account(&mut acc)?;
+                db.save_antigravity_account(&acc)?;
+                count += 1;
+            }
+            Err(error) => {
+                tracing::warn!(entry = index + 1, %error, "skipped an account during import");
+                first_error.get_or_insert_with(|| HubError::Operation(format!("Import entry {}: {error}", index + 1)));
+            }
+        }
+    }
+    match (count, first_error) {
+        (0, Some(error)) => Err(error),
+        _ => Ok(count),
+    }
+}
+
+fn import_entry(entry: &serde_json::Value) -> Result<AntigravityAccount> {
+    if let Ok(mut acc) = serde_json::from_value::<AntigravityAccount>(entry.clone()) {
+        if acc.email.trim().is_empty() {
+            return Err(HubError::Operation("the account has no email".into()));
+        }
+        // Exports may come from another PC: whichever account is current there is not here.
+        acc.is_current = false;
         if let Some((quota, details)) = fetch_google_quota_summary(&acc.access_token, acc.project_id.as_deref(), acc.proxy_url.as_deref()) {
             acc.quota_remaining_percent = Some(quota);
             acc.quota_details = Some(details);
         }
-        lock(database)?.save_antigravity_account(&acc)?;
-        count += 1;
+        return Ok(acc);
     }
-    Ok(count)
+    let text = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| entry.get(*key).and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    let refresh_token = text(&["refreshToken", "refresh_token"]).ok_or_else(|| HubError::Operation("no refresh token".into()))?;
+    let proxy = text(&["proxyUrl", "proxy_url"]).map(|url| validate_proxy_url(&url)).transpose()?;
+    account_from_refresh_token(&text(&["email"]).unwrap_or_default(), &refresh_token, proxy.as_deref())
 }
 
 /// Refreshes every pooled account that has a saved sign-in: renews tokens near expiry and pulls
@@ -891,14 +1040,17 @@ pub fn sync_antigravity_active_session(database: &Mutex<Database>) -> Result<Ant
         return Ok(session);
     };
     let email_lower = email.to_lowercase();
-    let target_id = format!("antigravity:{}", email_lower);
+    // The pool row may carry an id other than the usual one (an older import), so the id of the
+    // row that matched by email is the one marked current.
+    let mut target_id = account_id(email);
     let mut found = false;
     {
         let db = lock(database)?;
         for mut acc in db.antigravity_accounts()? {
             let mut changed = heal_if_reset(&mut acc, session.verified_at);
-            if acc.email.to_lowercase() == email_lower {
+            if !found && acc.email.to_lowercase() == email_lower {
                 found = true;
+                target_id = acc.id.clone();
                 changed = true;
                 acc.is_current = true;
                 acc.last_used = session.verified_at;
@@ -1233,7 +1385,9 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
         }
     }
 
-    let email = email_opt.unwrap_or_else(|| "google_account".into());
+    let email = email_opt.ok_or_else(|| {
+        HubError::Operation("Could not tell which Google account Antigravity is signed in with; open Antigravity and try again.".into())
+    })?;
 
     // 3. Fetch real quota percentage directly from Google CloudCode internal quota API!
     let (mut quota_pct, mut quota_details) = match fetch_google_quota_summary(&access_token, details.project_id.as_deref(), None) {
@@ -1430,6 +1584,10 @@ pub fn calculate_health_score(quota_pct: Option<f64>, status: &str, last_used: i
     (base_quota * 0.85 + rest_bonus).clamp(0.0, 100.0)
 }
 
+/// Minimum time between two automatic switch attempts, successful or not.
+const AUTO_SWITCH_COOLDOWN: Duration = Duration::from_secs(180);
+static LAST_AUTO_SWITCH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
 /// Evaluates if an auto-switch is needed and triggers it
 pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccount>> {
     let settings = state
@@ -1524,6 +1682,17 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
         });
     }
 
+    // The monitor calls this every few seconds. Without a pause after an attempt, a switch that
+    // keeps failing (the IDE stays on the old account, the token is refused) would rewrite the
+    // sign-in and restart Antigravity's language server over and over.
+    {
+        let mut last_attempt = LAST_AUTO_SWITCH.lock().map_err(|_| HubError::Operation("auto-switch lock is unavailable".into()))?;
+        if last_attempt.is_some_and(|at| at.elapsed() < AUTO_SWITCH_COOLDOWN) {
+            return Ok(None);
+        }
+        *last_attempt = Some(std::time::Instant::now());
+    }
+
     let chosen = candidates[0].clone();
     let switched = switch_to_account(&state.database, &chosen.id)?;
     let db = lock(&state.database)?;
@@ -1612,6 +1781,29 @@ mod tests {
         let body = serde_json::json!({"currentTier": {"id": "free-tier"}, "paidTier": {"id": "g1-ultra-tier"}});
         assert_eq!(tier_from_load_response(&body).as_deref(), Some("g1-ultra-tier"));
         assert_eq!(tier_from_load_response(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn oauth_codes_are_decoded_from_any_pasted_form() {
+        // Google may send the slash escaped; encoding it again on exchange broke the sign-in.
+        assert_eq!(query_param("/auth/callback?code=4%2F0AbC-d&scope=x", "code").as_deref(), Some("4/0AbC-d"));
+        assert_eq!(query_param("/auth/callback?error=access_denied", "error").as_deref(), Some("access_denied"));
+        assert_eq!(query_param("/favicon.ico", "code"), None);
+        assert_eq!(extract_oauth_code(" 4/0AbC-d ").unwrap(), "4/0AbC-d");
+        assert_eq!(extract_oauth_code("4%2F0AbC-d").unwrap(), "4/0AbC-d");
+        assert_eq!(extract_oauth_code("http://localhost:8045/auth/callback?code=4%2F0AbC-d&scope=email%20profile").unwrap(), "4/0AbC-d");
+        assert!(extract_oauth_code("   ").is_err());
+        assert_eq!(percent_decode("a%zz%2"), "a%zz%2", "malformed escapes are kept as typed");
+    }
+
+    #[test]
+    fn minimal_import_entries_without_a_refresh_token_are_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Mutex::new(Database::open(&directory.path().join("hub.sqlite3")).unwrap());
+        let error = import_antigravity_accounts_json(&database, r#"[{"email":"a@example.com"}]"#).unwrap_err();
+        assert!(error.to_string().contains("no refresh token"), "{error}");
+        assert!(import_antigravity_accounts_json(&database, "42").is_err());
+        assert_eq!(import_antigravity_accounts_json(&database, "[]").unwrap(), 0);
     }
 
     #[test]

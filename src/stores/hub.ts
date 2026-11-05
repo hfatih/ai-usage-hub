@@ -50,11 +50,17 @@ export const useHub = create<HubState>((set, get) => ({
   refreshing: false,
   error: null,
   load: async () => {
-    set({ loading: true, error: null });
+    // The backend asks for a reload every time something changes (at least once a minute). Only
+    // the very first load shows the skeleton; later ones swap the data in place.
+    set({ loading: get().snapshot === null, error: null });
     try {
-      const [snapshot, settings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security] = await Promise.all([
+      const [snapshot, fetchedSettings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security] = await Promise.all([
         api.dashboard(), api.settings(), api.accounts(), api.antigravityAccounts(), api.getAntigravityLiveSession(), api.usageHistory(), api.notifications(), api.security(),
       ]);
+      // Keep the same object when nothing changed, so pages that edit a draft of the settings
+      // (Settings, API Proxy) do not lose unsaved edits on every background reload.
+      const current = get().settings;
+      const settings = current && JSON.stringify(current) === JSON.stringify(fetchedSettings) ? current : fetchedSettings;
       set({ snapshot, settings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security, loading: false });
     } catch (error) {
       set({ error: String(error), loading: false });

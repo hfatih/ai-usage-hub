@@ -12,6 +12,11 @@ use crate::{
     },
 };
 
+/// Seconds within which an unchanged usage reading is not stored again.
+const UNCHANGED_SNAPSHOT_INTERVAL: i64 = 15 * 60;
+/// Usage readings older than this are removed when the app starts.
+const SNAPSHOT_RETENTION_DAYS: i64 = 180;
+
 /// Matches pool accounts that still hold a sign-in token in plain text.
 const PLAIN_TOKEN_FILTER: &str = "(access_token <> '' AND access_token NOT LIKE 'dpapi:%') OR (refresh_token <> '' AND refresh_token NOT LIKE 'dpapi:%') OR (COALESCE(id_token, '') <> '' AND id_token NOT LIKE 'dpapi:%')";
 
@@ -181,6 +186,10 @@ impl Database {
         self.connection.execute(
             "DELETE FROM usage_snapshots WHERE metric = 'antigravity_image_generation' OR metric LIKE 'google\\_credit\\_%' ESCAPE '\\'",
             [],
+        )?;
+        self.connection.execute(
+            "DELETE FROM usage_snapshots WHERE retrieved_at < ?1",
+            [Utc::now().timestamp() - SNAPSHOT_RETENTION_DAYS * 86_400],
         )?;
         Ok(())
     }
@@ -420,13 +429,25 @@ impl Database {
             .iter()
             .filter(|usage| usage.value.is_some() && usage.source != UsageSource::LocalLogs)
         {
-            let previous: Option<f64> = tx
+            let latest: Option<(f64, Option<f64>, Option<i64>, i64)> = tx
                 .query_row(
-                    "SELECT value FROM usage_snapshots WHERE account_id = ?1 AND metric = ?2 AND value IS NOT NULL ORDER BY retrieved_at DESC, id DESC LIMIT 1",
+                    "SELECT value, max_value, reset_at, retrieved_at FROM usage_snapshots WHERE account_id = ?1 AND metric = ?2 AND value IS NOT NULL ORDER BY retrieved_at DESC, id DESC LIMIT 1",
                     params![account_id, usage.metric],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()?;
+            let previous = latest.map(|(value, ..)| value);
+            // The background refresh runs every minute; repeating an unchanged reading that often
+            // only grows the database (tens of thousands of rows a day). A reading that changed,
+            // or one 15 minutes after the last stored row, is kept.
+            if latest.is_some_and(|(value, max_value, reset_at, retrieved_at)| {
+                Some(value) == usage.value
+                    && max_value == usage.max_value
+                    && reset_at == usage.reset_at
+                    && (0..UNCHANGED_SNAPSHOT_INTERVAL).contains(&(usage.retrieved_at - retrieved_at))
+            }) {
+                continue;
+            }
             tx.execute(
                 "INSERT INTO usage_snapshots (account_id, metric, value, max_value, unit, source, confidence, window_type, reset_at, retrieved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
@@ -745,6 +766,20 @@ impl Database {
                 account.tier,
             ],
         )?;
+        Ok(())
+    }
+
+    /// Prepares a freshly built account (sign-in, manual add, import) for saving over one that may
+    /// already be in the pool: it stays the current account if it was, and keeps its stored
+    /// refresh token when the new sign-in did not come with one, so re-adding an account never
+    /// signs it out of the pool.
+    pub fn merge_existing_antigravity_account(&self, account: &mut AntigravityAccount) -> Result<()> {
+        if let Some(existing) = self.antigravity_account(&account.id)? {
+            account.is_current = existing.is_current;
+            if account.refresh_token.is_empty() {
+                account.refresh_token = existing.refresh_token;
+            }
+        }
         Ok(())
     }
 
@@ -1249,6 +1284,16 @@ mod tests {
         db.save_provider_snapshot(&provider("account-a", "a@example.com", 70.0, 100))?;
         db.save_provider_snapshot(&provider("account-b", "b@example.com", 30.0, 200))?;
         db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300))?;
+        // The same reading a minute later is not stored again; a change is.
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 360))?;
+        let rows_a = |db: &Database| -> Result<i64> {
+            Ok(db.connection.query_row("SELECT COUNT(*) FROM usage_snapshots WHERE account_id = 'openai:account-a'", [], |row| row.get(0))?)
+        };
+        assert_eq!(rows_a(&db)?, 2);
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300 + UNCHANGED_SNAPSHOT_INTERVAL))?;
+        assert_eq!(rows_a(&db)?, 3);
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300 + UNCHANGED_SNAPSHOT_INTERVAL + 60))?;
+        assert_eq!(rows_a(&db)?, 3);
 
         let account_count: i64 =
             db.connection

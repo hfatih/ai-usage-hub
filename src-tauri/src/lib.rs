@@ -253,10 +253,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 let _ = app.emit("hub://navigate", "settings");
             }
             "refresh" => {
-                let state = app.state::<HubState>();
-                if refresh_all(&state, true).is_ok() {
-                    let _ = app.emit("hub://status-changed", ());
-                }
+                // A forced refresh calls the providers over the network; doing it here would
+                // freeze the tray and the window until every provider has answered.
+                let app = app.clone();
+                thread::spawn(move || {
+                    if refresh_all(&app.state::<HubState>(), true).is_ok() {
+                        let _ = app.emit("hub://status-changed", ());
+                    }
+                });
             }
             "pause" => {
                 let state = app.state::<HubState>();
@@ -272,7 +276,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             id if id.starts_with("launch:") => {
                 let state = app.state::<HubState>();
-                if let Err(error) = commands::launch(&state, &id[7..]) {
+                if let Err(error) = commands::launch(&state, &id["launch:".len()..]) {
                     tracing::warn!(%error, "tray launch failed");
                 }
             }
@@ -439,6 +443,8 @@ pub fn run() {
                         settings.proxy_api_key = proxy::generate_api_key();
                         let _ = db.save_settings(&settings);
                     }
+                    // "Process monitoring" off in Settings must survive a restart.
+                    state.paused.store(!settings.process_monitoring, Ordering::Relaxed);
                     proxy::set_proxy_options(settings.proxy_timeout_seconds, settings.proxy_background_downgrade);
                     proxy_port = settings.proxy_port;
                     proxy::set_model_map(settings.proxy_model_map);

@@ -3,6 +3,50 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [Unreleased]
+
+Bug fixes from a full review of the codebase:
+
+- **Google sign-in:** the code Google sends back is now URL-decoded. An
+  escaped code (`4%2F0...`) used to be encoded a second time and refused.
+  The callback also waits for the browser to send its request (on Windows an
+  early read could come back empty and lose the code). Pressing "Cancel" on
+  Google's page now ends the wait at once instead of after two minutes. The
+  manual field accepts the bare code or the whole redirect address.
+- **Re-adding an account** no longer clears its saved refresh token when
+  Google sends no new one, and no longer un-marks the current account. An
+  account whose email cannot be determined is refused instead of being saved
+  as `google_account`.
+- **Import** accepts the `[{"email": ..., "refresh_token": ...}]` list the
+  dialog suggests. Before, only the app's own export format worked. Entries
+  that fail are skipped and the rest are imported.
+- **Auto-switch** waits three minutes between attempts. A switch that kept
+  failing used to rewrite the sign-in and restart Antigravity's language
+  server every few seconds.
+- **API Proxy page:** reading the proxy status no longer counts as using an
+  account. The 5-second poll used to bump `last_used` (rotating round-robin
+  and delaying rate-limit healing) and could refresh tokens on the UI thread.
+- The proxy no longer holds the database lock while it asks Google for tokens
+  or quota, so a slow answer does not freeze the app. It refuses request
+  bodies over 64 MB before allocating them, and keeps every system message
+  instead of only the last.
+- **New proxy key:** Claude Code and OpenCode configs that the hub connected
+  get the new key automatically instead of failing with 401.
+- **Process monitoring off** in Settings now survives a restart.
+- Settings are fully checked before anything is applied, so a refused save
+  no longer changes Windows startup.
+- The tray's "Refresh" runs in the background instead of freezing the tray.
+- `claude auth status` is stopped after 15 seconds, so a hung Claude CLI no
+  longer stalls every later provider refresh.
+- When the saved Antigravity sign-in is renewed a second time, its new expiry
+  and refresh token are now written too.
+- Usage history keeps an unchanged reading only every 15 minutes and drops
+  readings older than 180 days, instead of growing by a row per metric every
+  minute.
+- The dashboard no longer flashes its loading skeleton on every background
+  update. Unsaved edits on the Settings page are no longer reset once a
+  minute.
+
 ## [0.1.25] - 2026-10-17
 
 - **Update button:** when GitHub has a newer release, the top bar offers it.
