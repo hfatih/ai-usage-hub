@@ -1,4 +1,4 @@
-import { Globe, Power } from "lucide-react";
+import { Globe, Power, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "../../i18n";
 import { relativeTime, resetTime, shortResetTime } from "../../lib/format";
@@ -89,6 +89,39 @@ export function AccountProxyButton({ account, compact = false }: { account: Anti
     >
       <Globe size={compact ? 11 : 13} />
       {t(account.proxyUrl ? "Proxy on" : "Proxy")}
+    </button>
+  );
+}
+
+/** Shown for a benched account (rate-limited, expired or forbidden): puts it back into rotation. */
+export function ResetStatusButton({ account, compact = false }: { account: AntigravityAccount; compact?: boolean }) {
+  const { t } = useTranslation();
+  const loadAntigravityAccounts = useHub((state) => state.loadAntigravityAccounts);
+  const [busy, setBusy] = useState(false);
+  if (account.status === "healthy" || account.status === "active") return null;
+
+  async function reset() {
+    try {
+      setBusy(true);
+      await api.resetAntigravityAccountStatus(account.id);
+      await loadAntigravityAccounts();
+    } catch (reason) {
+      alert(String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={compact ? "secondary-button-sm" : "secondary-button"}
+      onClick={() => void reset()}
+      disabled={busy}
+      title={t("Put this account back into rotation. It is flagged again if the problem is still there.")}
+    >
+      <RotateCcw size={compact ? 11 : 13} />
+      {t("Reset status")}
     </button>
   );
 }

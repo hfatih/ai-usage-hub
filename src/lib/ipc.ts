@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint, UsageTrend } from "../types";
 import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
@@ -147,6 +147,10 @@ export const api = {
     inTauri() ? call("clear_proxy_logs") : Promise.resolve(true),
   setAntigravityAccountProxy: (accountId: string, proxyUrl: string): Promise<string | null> =>
     inTauri() ? call("set_antigravity_account_proxy", { accountId, proxyUrl }) : Promise.resolve(proxyUrl || null),
+  resetAntigravityAccountStatus: (accountId: string): Promise<boolean> =>
+    inTauri() ? call("reset_antigravity_account_status", { accountId }) : Promise.resolve(true),
+  usageTrends: (hours = 24): Promise<UsageTrend[]> =>
+    inTauri() ? call("get_usage_trends", { hours }) : Promise.resolve([]),
   closeAntigravity: (force: boolean): Promise<boolean> =>
     inTauri() ? call("close_antigravity", { force }) : Promise.resolve(true),
   acknowledgeProxyRisk: (): Promise<AppSettings> =>

@@ -192,6 +192,7 @@ mod win_cred {
     pub fn write_credential(_target: &str, _user: &str, _secret: &[u8]) -> Result<(), String> {
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn delete_credential(_target: &str) -> Result<(), String> {
         Ok(())
     }
@@ -464,12 +465,55 @@ pub fn refresh_google_oauth_token(refresh_token: &str, proxy: Option<&str>) -> R
         .map_err(|e| HubError::Operation(format!("Failed to parse token response: {}", e)))
 }
 
+/// How long a sign-in link stays valid for the localhost callback.
+const OAUTH_STATE_LIFETIME: Duration = Duration::from_secs(15 * 60);
+/// `state` values of sign-in links handed out recently. The callback only accepts a code that
+/// comes back with one of them, so another program or web page cannot push its own Google
+/// account into the pool by calling `localhost:8045` (OAuth login CSRF).
+static ISSUED_OAUTH_STATES: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// An unguessable hex string from the OS-seeded hasher keys (no extra randomness dependency).
+fn random_hex() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    (0..2)
+        .map(|_| {
+            let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+            hasher.write_u128(Utc::now().timestamp_nanos_opt().unwrap_or_default() as u128);
+            format!("{:016x}", hasher.finish())
+        })
+        .collect()
+}
+
+fn issue_oauth_state() -> String {
+    let state = random_hex();
+    if let Ok(mut issued) = ISSUED_OAUTH_STATES.lock() {
+        issued.retain(|(_, at)| at.elapsed() < OAUTH_STATE_LIFETIME);
+        issued.push((state.clone(), std::time::Instant::now()));
+    }
+    state
+}
+
+/// Whether `state` belongs to a sign-in link this app handed out and is still valid. A state is
+/// accepted once.
+fn take_oauth_state(state: &str) -> bool {
+    let Ok(mut issued) = ISSUED_OAUTH_STATES.lock() else { return false };
+    issued.retain(|(_, at)| at.elapsed() < OAUTH_STATE_LIFETIME);
+    match issued.iter().position(|(value, _)| value == state) {
+        Some(index) => {
+            issued.remove(index);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Generate the browser authorization URL for Google OAuth
 pub fn get_google_oauth_auth_url() -> String {
     format!(
-        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/cloud-platform%20https://www.googleapis.com/auth/userinfo.email%20https://www.googleapis.com/auth/userinfo.profile&access_type=offline&prompt=consent",
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/cloud-platform%20https://www.googleapis.com/auth/userinfo.email%20https://www.googleapis.com/auth/userinfo.profile&access_type=offline&prompt=consent&state={}",
         percent_encode(&get_oauth_client_id()),
-        percent_encode(OAUTH_REDIRECT_URI)
+        percent_encode(OAUTH_REDIRECT_URI),
+        issue_oauth_state(),
     )
 }
 
@@ -532,6 +576,8 @@ pub fn listen_for_oauth_callback(timeout_secs: u64) -> Result<String> {
                 let request_line = read_request_line(&mut stream);
                 let target = request_line.split_whitespace().nth(1).unwrap_or_default();
                 let code = query_param(target, "code").filter(|code| !code.is_empty());
+                // A code is only taken together with a `state` from a link this app issued.
+                let code = code.filter(|_| query_param(target, "state").is_some_and(|state| take_oauth_state(&state)));
                 // The user pressed "Cancel" on Google's consent screen: stop waiting right away.
                 let denied = query_param(target, "error");
 
@@ -815,9 +861,11 @@ pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<Antigravit
             Some((quota, details)) => {
                 acc.quota_remaining_percent = Some(quota);
                 acc.quota_details = Some(details);
-                if acc.status != "forbidden" {
-                    acc.status = if quota <= 0.0 { "rate_limited" } else { "healthy" }.into();
-                }
+                // A readable quota with a working token also clears `forbidden` and `expired`:
+                // the proxy flags `forbidden` on any 403, which can be a one-off (a model the
+                // plan does not include) and used to bench the account for good. A real ban
+                // fails this read, or is flagged again by the next 403.
+                acc.status = if quota <= 0.0 { "rate_limited" } else { "healthy" }.into();
             }
             None => {
                 heal_if_reset(&mut acc, now);
@@ -1794,6 +1842,16 @@ mod tests {
         assert_eq!(extract_oauth_code("http://localhost:8045/auth/callback?code=4%2F0AbC-d&scope=email%20profile").unwrap(), "4/0AbC-d");
         assert!(extract_oauth_code("   ").is_err());
         assert_eq!(percent_decode("a%zz%2"), "a%zz%2", "malformed escapes are kept as typed");
+    }
+
+    #[test]
+    fn sign_in_callbacks_need_a_state_this_app_issued_and_only_once() {
+        let url = get_google_oauth_auth_url();
+        let state = query_param(&url, "state").unwrap();
+        assert_eq!(state.len(), 32);
+        assert!(!take_oauth_state("forged"));
+        assert!(take_oauth_state(&state));
+        assert!(!take_oauth_state(&state), "a state is single-use");
     }
 
     #[test]

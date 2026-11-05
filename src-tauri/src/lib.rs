@@ -366,6 +366,14 @@ fn start_monitor(app: tauri::AppHandle) {
             tracing::info!(account = %switched.email, "Antigravity auto-switched account");
             let _ = app.emit("hub://status-changed", ());
             let _ = app.emit("hub://antigravity-switched", &switched);
+            // The window is usually hidden in the tray when this happens; say so on the desktop.
+            let settings = app.state::<HubState>().database.lock().ok().and_then(|db| db.settings().ok());
+            if let Some(settings) = settings.filter(|settings| settings.desktop_notifications && settings.notifications_enabled) {
+                let (title, body) = i18n::auto_switch_text(&switched.email, &settings.language);
+                if let Err(error) = app.notification().builder().title(title).body(body).show() {
+                    tracing::warn!(%error, "could not show auto-switch notification");
+                }
+            }
         }
         let interval = app
             .state::<HubState>()
@@ -524,6 +532,8 @@ pub fn run() {
             commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
             commands::set_antigravity_account_proxy,
+            commands::reset_antigravity_account_status,
+            commands::get_usage_trends,
             commands::close_antigravity,
             commands::acknowledge_proxy_risk,
             commands::set_provider_key,

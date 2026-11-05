@@ -192,6 +192,15 @@ pub struct UsageHistoryPoint {
     pub usage: UsageValue,
 }
 
+/// Recent readings of one metric of one saved account, oldest first, as `[timestamp, value]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageTrend {
+    pub account_id: String,
+    pub metric: String,
+    pub points: Vec<(i64, f64)>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityStatus {

@@ -8,7 +8,7 @@ use crate::{
     error::{HubError, Result},
     models::{
         AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings,
-        DashboardSnapshot, SecurityStatus, UsageHistoryPoint,
+        DashboardSnapshot, SecurityStatus, UsageHistoryPoint, UsageTrend,
     },
     refresh_all, update_tray_language, HubState,
 };
@@ -57,6 +57,17 @@ pub fn get_usage_history(state: State<'_, HubState>) -> Result<Vec<UsageHistoryP
         .lock()
         .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
         .usage_history(250)
+}
+
+/// Readings of the last `hours` (default 24, at most a week) for the Usage page's trend lines.
+#[tauri::command]
+pub fn get_usage_trends(state: State<'_, HubState>, hours: Option<i64>) -> Result<Vec<UsageTrend>> {
+    let hours = hours.unwrap_or(24).clamp(1, 24 * 7);
+    state
+        .database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+        .usage_trends(chrono::Utc::now().timestamp() - hours * 3600, 96)
 }
 
 #[tauri::command]
@@ -315,11 +326,10 @@ pub fn start_antigravity_oauth_login(
     state: State<'_, HubState>,
     open_browser: Option<bool>,
 ) -> Result<AntigravityAccount> {
-    let auth_url = crate::antigravity::get_google_oauth_auth_url();
-
     // `false` = the user copied the link to open it in a browser/profile of their choice.
     #[cfg(windows)]
     if open_browser.unwrap_or(true) {
+        let auth_url = crate::antigravity::get_google_oauth_auth_url();
         let _ = std::process::Command::new("rundll32")
             .args(["url.dll,FileProtocolHandler", &auth_url])
             .spawn();
@@ -517,6 +527,21 @@ pub fn set_antigravity_account_proxy(
         return Err(HubError::Operation("account is no longer in the pool".into()));
     }
     Ok(proxy_url)
+}
+
+/// Puts a benched pool account (rate-limited, expired or forbidden) back into rotation by hand.
+/// The next proxy error or quota read flags it again if the problem is still there.
+#[tauri::command]
+pub fn reset_antigravity_account_status(state: State<'_, HubState>, account_id: String) -> Result<bool> {
+    let found = state
+        .database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+        .set_antigravity_account_status(&account_id, "healthy")?;
+    if !found {
+        return Err(HubError::Operation("account is no longer in the pool".into()));
+    }
+    Ok(true)
 }
 
 /// Closes the Antigravity IDE; `force` ends it without letting it prompt for unsaved work.

@@ -104,6 +104,10 @@ const tr: Record<string, string> = {
   "Version {version} is available on GitHub": "{version} sürümü GitHub'da yayınlandı",
   "Downloading update...": "Güncelleme indiriliyor...",
   "Update to {version}": "{version} sürümüne güncelle",
+  "Expired": "Süresi doldu",
+  "Reset status": "Durumu sıfırla",
+  "Put this account back into rotation. It is flagged again if the problem is still there.": "Bu hesabı yeniden rotasyona alır. Sorun sürüyorsa tekrar işaretlenir.",
+  "Last 24 hours": "Son 24 saat",
 };
 
 export default tr;

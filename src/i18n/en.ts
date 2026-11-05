@@ -104,6 +104,10 @@ const en: Record<string, string> = {
   "Version {version} is available on GitHub": "Version {version} is available on GitHub",
   "Downloading update...": "Downloading update...",
   "Update to {version}": "Update to {version}",
+  "Expired": "Expired",
+  "Reset status": "Reset status",
+  "Put this account back into rotation. It is flagged again if the problem is still there.": "Put this account back into rotation. It is flagged again if the problem is still there.",
+  "Last 24 hours": "Last 24 hours",
 };
 
 export default en;

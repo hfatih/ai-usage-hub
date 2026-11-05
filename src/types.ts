@@ -220,3 +220,10 @@ export interface ProxyStatus {
   recentLogs?: ProxyRequestLog[];
 }
 
+
+/** Recent readings of one metric of one saved account, oldest first, as `[timestamp, value]`. */
+export interface UsageTrend {
+  accountId: string;
+  metric: string;
+  points: Array<[number, number]>;
+}

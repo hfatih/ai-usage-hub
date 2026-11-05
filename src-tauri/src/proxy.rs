@@ -898,6 +898,82 @@ fn mark_account_status(state: &HubState, account_id: &str, status: &str) {
     }
 }
 
+/// The plain text of an OpenAI/Anthropic message `content` (a string or a list of blocks).
+fn content_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks.iter().filter_map(|block| block.get("text").and_then(Value::as_str)).collect(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// `(mime type, base64 data)` of a `data:` URL.
+fn data_url(url: &str) -> Option<(String, String)> {
+    let (header, data) = url.strip_prefix("data:")?.split_once(',')?;
+    let mime = header.strip_suffix(";base64")?;
+    Some((if mime.is_empty() { "image/png".to_owned() } else { mime.to_owned() }, data.to_owned()))
+}
+
+/// Gemini `parts` for an OpenAI or Anthropic message `content`. Besides text this keeps:
+/// images (OpenAI `image_url` with a `data:` URL, Anthropic `image` with a base64 source) as
+/// `inlineData`, so screenshots pasted into Claude Code or a chat client reach the model; and
+/// Anthropic `tool_use` / `tool_result` blocks as readable text, so the model still sees what a
+/// tool was asked and what it answered. An image only reachable by web address is named in text.
+fn content_parts(content: &Value) -> Vec<Value> {
+    let Value::Array(blocks) = content else {
+        return vec![json!({ "text": content_text(content) })];
+    };
+    let mut parts = Vec::new();
+    for block in blocks {
+        let kind = block.get("type").and_then(Value::as_str).unwrap_or_default();
+        match kind {
+            "image_url" => {
+                let url = block.pointer("/image_url/url").or_else(|| block.get("image_url")).and_then(Value::as_str).unwrap_or_default();
+                match data_url(url) {
+                    Some((mime, data)) => parts.push(json!({ "inlineData": { "mimeType": mime, "data": data } })),
+                    None if !url.is_empty() => parts.push(json!({ "text": format!("[image: {url}]") })),
+                    None => {}
+                }
+            }
+            "image" => match block.get("source") {
+                Some(source) if source.get("type").and_then(Value::as_str) == Some("base64") => {
+                    let mime = source.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+                    if let Some(data) = source.get("data").and_then(Value::as_str) {
+                        parts.push(json!({ "inlineData": { "mimeType": mime, "data": data } }));
+                    }
+                }
+                Some(source) => {
+                    if let Some(url) = source.get("url").and_then(Value::as_str) {
+                        parts.push(json!({ "text": format!("[image: {url}]") }));
+                    }
+                }
+                None => {}
+            },
+            "tool_use" => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                let input = block.get("input").map(Value::to_string).unwrap_or_default();
+                parts.push(json!({ "text": format!("[called {name} with {input}]") }));
+            }
+            "tool_result" => {
+                let result = block.get("content").map(content_parts).unwrap_or_default();
+                let failed = block.get("is_error").and_then(Value::as_bool) == Some(true);
+                parts.push(json!({ "text": if failed { "[tool error]" } else { "[tool result]" } }));
+                parts.extend(result);
+            }
+            _ => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    parts.push(json!({ "text": text }));
+                }
+            }
+        }
+    }
+    if parts.is_empty() {
+        parts.push(json!({ "text": "" }));
+    }
+    parts
+}
+
 /// Helper to extract clean response text and token metrics from CloudCode response
 fn parse_upstream_candidates(upstream_res: &Value) -> (String, u64, u64) {
     let candidates = upstream_res
@@ -970,21 +1046,8 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
 
     if let Some(messages) = req.messages {
         for msg in messages {
-            let text = match msg.content {
-                Value::String(s) => s,
-                Value::Array(arr) => {
-                    let mut combined = String::new();
-                    for item in arr {
-                        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                            combined.push_str(t);
-                        }
-                    }
-                    combined
-                }
-                _ => msg.content.to_string(),
-            };
-
             if msg.role == "system" || msg.role == "developer" {
+                let text = content_text(&msg.content);
                 // Several system messages are common (tool instructions plus a persona); keep all.
                 system_text = match system_text.take() {
                     Some(previous) => Some(format!("{previous}\n\n{text}")),
@@ -994,7 +1057,7 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
                 let role = if msg.role == "assistant" { "model" } else { "user" };
                 contents.push(json!({
                     "role": role,
-                    "parts": [{ "text": text }]
+                    "parts": content_parts(&msg.content)
                 }));
             }
         }
@@ -1165,19 +1228,7 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     let mut system_instruction = None;
 
     if let Some(sys) = req.system {
-        let text = match sys {
-            Value::String(s) => s,
-            Value::Array(arr) => {
-                let mut combined = String::new();
-                for item in arr {
-                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                        combined.push_str(t);
-                    }
-                }
-                combined
-            }
-            _ => sys.to_string(),
-        };
+        let text = content_text(&sys);
         system_instruction = Some(json!({
             "parts": [{ "text": text }]
         }));
@@ -1185,23 +1236,10 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
 
     if let Some(messages) = req.messages {
         for msg in messages {
-            let text = match msg.content {
-                Value::String(s) => s,
-                Value::Array(arr) => {
-                    let mut combined = String::new();
-                    for item in arr {
-                        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                            combined.push_str(t);
-                        }
-                    }
-                    combined
-                }
-                _ => msg.content.to_string(),
-            };
             let role = if msg.role == "assistant" { "model" } else { "user" };
             contents.push(json!({
                 "role": role,
-                "parts": [{ "text": text }]
+                "parts": content_parts(&msg.content)
             }));
         }
     }
@@ -1656,6 +1694,34 @@ mod tests {
         assert!(chat_upstream_model("claude-sonnet-4", &title).contains("flash"));
         let work = json!({ "contents": [{ "role": "user", "parts": [{ "text": "Refactor this function" }] }] });
         assert!(!chat_upstream_model("claude-sonnet-4", &work).contains("flash"));
+    }
+
+    #[test]
+    fn images_and_tool_blocks_reach_the_model() {
+        let openai = json!([
+            { "type": "text", "text": "What is in this?" },
+            { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } },
+            { "type": "image_url", "image_url": { "url": "https://example.com/cat.png" } }
+        ]);
+        assert_eq!(content_parts(&openai), vec![
+            json!({ "text": "What is in this?" }),
+            json!({ "inlineData": { "mimeType": "image/jpeg", "data": "QUJD" } }),
+            json!({ "text": "[image: https://example.com/cat.png]" }),
+        ]);
+
+        let anthropic = json!([
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "WFla" } },
+            { "type": "tool_result", "tool_use_id": "t1", "content": [{ "type": "text", "text": "42 files" }] },
+            { "type": "tool_use", "id": "t2", "name": "Read", "input": { "path": "a.rs" } }
+        ]);
+        let parts = content_parts(&anthropic);
+        assert_eq!(parts[0], json!({ "inlineData": { "mimeType": "image/png", "data": "WFla" } }));
+        assert_eq!(&parts[1..3], &[json!({ "text": "[tool result]" }), json!({ "text": "42 files" })]);
+        assert_eq!(parts[3], json!({ "text": "[called Read with {\"path\":\"a.rs\"}]" }));
+
+        assert_eq!(content_parts(&json!("hi")), vec![json!({ "text": "hi" })]);
+        assert_eq!(content_parts(&json!([])), vec![json!({ "text": "" })]);
+        assert_eq!(content_text(&json!([{ "type": "text", "text": "a" }, { "type": "text", "text": "b" }])), "ab");
     }
 
     #[test]

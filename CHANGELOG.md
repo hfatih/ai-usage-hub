@@ -5,7 +5,31 @@ Rust crate, and Tauri bundle versions together.
 
 ## [Unreleased]
 
+New:
+
+- **Images through the proxy:** screenshots and pictures in OpenAI
+  (`image_url` with a `data:` URL) and Anthropic (`image` base64) messages are
+  passed to the model. Before, everything except plain text was dropped.
+  Claude Code's tool calls and tool results are passed on as readable text
+  instead of disappearing.
+- **Usage trends:** each card on the Usage page shows a line of its last 24
+  hours.
+- **Reset status:** a rate-limited, expired or forbidden pool account can be
+  put back into rotation with one button. The ten-minute background quota read
+  also clears `forbidden` once the account answers normally again; one 403
+  used to bench an account for good.
+- **Auto-switch notification:** a desktop notification says which account
+  Antigravity was switched to, since the window is usually hidden.
+- **Sign-in protection:** Google sign-in links carry a one-time `state`, and
+  the localhost callback only accepts codes that come back with one. Before,
+  another program or web page could add its own Google account to the pool.
+
 Bug fixes from a full review of the codebase:
+
+- Expired pool accounts were labelled "Healthy" on their card.
+- Failed settings saves, app launches and executable choices were silently
+  ignored; they now show in the error banner.
+- The Activity page now updates live instead of only when it is opened.
 
 - **Google sign-in:** the code Google sends back is now URL-decoded. An
   escaped code (`4%2F0...`) used to be encoded a second time and refused.

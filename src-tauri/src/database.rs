@@ -8,7 +8,7 @@ use crate::{
     models::{
         AccountSummary, ActivityEvent, AntigravityAccount, AppSettings, AppStatus, ApplicationDefinition, Confidence,
         ConnectionStatus, ProviderSummary, RunningState, SecurityStatus, Severity,
-        UsageHistoryPoint, UsageSource, UsageValue,
+        UsageHistoryPoint, UsageSource, UsageTrend, UsageValue,
     },
 };
 
@@ -550,6 +550,34 @@ impl Database {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// Readings since `since` for every account and metric, oldest first, thinned to at most
+    /// `max_points` per series (evenly spaced, always keeping the newest).
+    pub fn usage_trends(&self, since: i64, max_points: usize) -> Result<Vec<UsageTrend>> {
+        let mut statement = self.connection.prepare(
+            "SELECT account_id, metric, retrieved_at, value FROM usage_snapshots WHERE retrieved_at >= ?1 AND value IS NOT NULL ORDER BY account_id, metric, retrieved_at, id",
+        )?;
+        let rows = statement.query_map([since], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, f64>(3)?))
+        })?;
+        let mut trends: Vec<UsageTrend> = Vec::new();
+        for row in rows {
+            let (account_id, metric, at, value) = row?;
+            match trends.last_mut() {
+                Some(trend) if trend.account_id == account_id && trend.metric == metric => trend.points.push((at, value)),
+                _ => trends.push(UsageTrend { account_id, metric, points: vec![(at, value)] }),
+            }
+        }
+        let max_points = max_points.max(2);
+        for trend in &mut trends {
+            let count = trend.points.len();
+            if count > max_points {
+                let step = (count - 1) as f64 / (max_points - 1) as f64;
+                trend.points = (0..max_points).map(|index| trend.points[((index as f64 * step).round() as usize).min(count - 1)]).collect();
+            }
+        }
+        Ok(trends)
+    }
+
     pub fn notifications(&self, limit: usize) -> Result<Vec<ActivityEvent>> {
         let mut statement = self.connection.prepare(
             "SELECT id, event_type, title, detail, severity, created_at FROM activity_events WHERE event_type LIKE 'usage_%' OR event_type = 'provider_error' ORDER BY created_at DESC LIMIT ?1",
@@ -803,6 +831,12 @@ impl Database {
             params![id, proxy_url.map(crate::secret::protect)],
         )?;
         Ok(changed > 0)
+    }
+
+    /// Sets a pool account's routing status (`healthy`, `rate_limited`, `expired`, `forbidden`).
+    /// Returns whether the account exists.
+    pub fn set_antigravity_account_status(&self, id: &str, status: &str) -> Result<bool> {
+        Ok(self.connection.execute("UPDATE antigravity_accounts SET status = ?2 WHERE id = ?1", params![id, status])? > 0)
     }
 
     /// API keys the user entered for key-based providers, by provider id, decrypted.
@@ -1333,6 +1367,13 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(active_count, 0);
+        let trends = db.usage_trends(0, 2)?;
+        let trend_a = trends.iter().find(|trend| trend.account_id == "openai:account-a").unwrap();
+        assert_eq!(trend_a.points.first(), Some(&(100, 70.0)));
+        assert_eq!(trend_a.points.len(), 2, "thinned to the requested number of points");
+        assert_eq!(trend_a.points.last().map(|point| point.0), Some(300 + UNCHANGED_SNAPSHOT_INTERVAL));
+        assert!(db.usage_trends(1_000_000, 50)?.is_empty());
+
         assert!(db.delete_account("openai:account-b")?);
         assert_eq!(db.accounts()?.len(), 1);
         Ok(())

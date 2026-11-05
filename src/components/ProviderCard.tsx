@@ -1,5 +1,6 @@
 import { ArrowUpRight, CircleAlert, Clock3, ExternalLink, ShieldCheck } from "lucide-react";
 import { api } from "../lib/ipc";
+import { useHub } from "../stores/hub";
 import { localizeValue, useTranslation } from "../i18n";
 import { formatClock, formatDuration, formatUsageValue, relativeTime, sourceLabel, usageProgress, usageTiming } from "../lib/format";
 import { PROVIDER_INITIALS } from "../lib/providers";
@@ -48,7 +49,7 @@ export function ProviderCard({ provider, apps }: { provider: ProviderSummary; ap
       <div className="card-footer">
         <span>{t("Refreshed {time}", { time: relativeTime(provider.lastRefresh) })}</span>
         <div>
-          <button className="card-action" disabled={!mainApp?.launchable} title={mainApp?.launchable ? t("Open {name}", { name: mainApp.displayName }) : t("Set the executable in Apps")} onClick={() => mainApp && void api.launchApp(mainApp.id)}>{t("Open")} <ExternalLink size={14} /></button>
+          <button className="card-action" disabled={!mainApp?.launchable} title={mainApp?.launchable ? t("Open {name}", { name: mainApp.displayName }) : t("Set the executable in Apps")} onClick={() => mainApp && void useHub.getState().launchApp(mainApp.id)}>{t("Open")} <ExternalLink size={14} /></button>
           <button className="round-action" aria-label={t("{name} details", { name: provider.name })}><ArrowUpRight size={15} /></button>
         </div>
       </div>
