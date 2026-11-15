@@ -51,7 +51,7 @@ const CLIENT_USER_AGENT: &str = "antigravity/darwin";
 #[cfg(not(target_os = "macos"))]
 const CLIENT_USER_AGENT: &str = "antigravity/windows";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KeyringTokenDetails {
     pub access_token: String,
     pub token_type: String,
@@ -63,10 +63,52 @@ pub struct KeyringTokenDetails {
     pub project_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The Antigravity sign-in stored under `gemini:antigravity` in Windows Credential Manager.
+///
+/// Antigravity 2.32+ keeps the account email in `id_token_email` instead of an `id_token`, and
+/// adds fields of its own (`writer_id`, `user_tier`, ...). Those land in `extra` and are written
+/// back unchanged, so rewriting the token never strips what Antigravity put there.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KeyringPayload {
     pub token: KeyringTokenDetails,
     pub auth_method: String,
+    /// Email of the signed-in account (Antigravity 2.32+). Must name the account the token belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_token_email: Option<String>,
+    /// Fields this hub does not interpret, kept as Antigravity wrote them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Stored fields that describe the signed-in account rather than the installation; dropped when
+/// another account's token is written in their place.
+const ACCOUNT_SCOPED_FIELDS: [&str; 3] = ["user_tier", "project_id", "region"];
+
+/// Fields to keep from the `previous` stored sign-in when writing `email`'s token over it:
+/// everything Antigravity added, minus the account-scoped ones when the account changes.
+fn carried_fields(previous: Option<&KeyringPayload>, email: &str) -> serde_json::Map<String, serde_json::Value> {
+    let Some(previous) = previous else {
+        return serde_json::Map::new();
+    };
+    let mut extra = previous.extra.clone();
+    let same_account = previous.id_token_email.as_deref().is_some_and(|old| old.eq_ignore_ascii_case(email));
+    if !same_account {
+        for key in ACCOUNT_SCOPED_FIELDS {
+            extra.remove(key);
+        }
+    }
+    extra
+}
+
+/// Email and display name of a stored sign-in, without a network call: the `id_token` claims
+/// when present, else Antigravity 2.32's `id_token_email` (no display name there).
+pub fn payload_identity(payload: &KeyringPayload) -> Option<(String, Option<String>)> {
+    payload
+        .token
+        .id_token
+        .as_deref()
+        .and_then(parse_jwt_claims)
+        .or_else(|| payload.id_token_email.clone().map(|email| (email, None)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,7 +287,8 @@ pub fn read_system_antigravity_credential() -> Result<Option<KeyringPayload>> {
 }
 
 /// Write an Antigravity sign-in where both flavours read it: the standalone app's token file
-/// (only when `~/.gemini` exists) and the IDE's entry in OS credential store.
+/// (only when it already exists, Antigravity 2.24-2.31) and the `gemini:antigravity` entry in
+/// the OS credential store (IDE, and the standalone app from 2.32).
 /// A failed IDE entry is only an error when the token file was not written either.
 pub fn write_system_antigravity_credential(payload: &KeyringPayload) -> Result<()> {
     let wrote_file = write_standalone_token_file(payload)?;
@@ -307,14 +350,16 @@ fn payload_from_standalone(value: &serde_json::Value) -> Result<KeyringPayload> 
     Ok(KeyringPayload {
         token,
         auth_method: value["auth_method"].as_str().unwrap_or("consumer").to_owned(),
+        ..Default::default()
     })
 }
 
 /// Updates the known fields of the token file and keeps any others the app may have added.
 /// Writes through a temporary file so a crash never leaves a half-written sign-in behind.
-/// Does nothing and returns `false` when `~/.gemini` does not exist (standalone app never installed).
+/// Does nothing and returns `false` when the file does not exist: Antigravity 2.32+ moved the
+/// sign-in into Credential Manager and can heal it from a leftover file, so one is never created.
 fn write_standalone_token_file(payload: &KeyringPayload) -> Result<bool> {
-    let Some(path) = standalone_token_path().filter(|path| path.parent().is_some_and(|dir| dir.is_dir())) else {
+    let Some(path) = standalone_token_path().filter(|path| path.is_file()) else {
         return Ok(false);
     };
     let existing = std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str(&raw).ok());
@@ -464,33 +509,38 @@ fn tier_from_load_response(body: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Closes the Antigravity IDE: politely (window close, unsaved work can prompt) or, with `force`,
-/// by ending the whole process tree. Returns whether any Antigravity process was found.
-/// Windows uses `taskkill`; macOS sends SIGTERM to the app's main binary, or with `force`
-/// SIGKILL to every process inside `Antigravity*.app` (helpers and language server included).
+/// Closes Antigravity, both the standalone app and the separately installed Antigravity IDE:
+/// politely (window close, unsaved work can prompt) or, with `force`, by ending each process
+/// tree. Returns whether any Antigravity process was found.
+/// Windows runs `taskkill` for `Antigravity.exe` and `Antigravity IDE.exe`; macOS sends SIGTERM
+/// to the main binary of every `Antigravity*.app`, or with `force` SIGKILL to every process
+/// inside them (helpers and language server included).
 pub fn close_antigravity(force: bool) -> Result<bool> {
     #[cfg(windows)]
-    let mut command = {
+    {
         use std::os::windows::process::CommandExt;
-        let mut command = std::process::Command::new("taskkill");
-        command.args(["/IM", "Antigravity.exe", "/T"]);
-        if force {
-            command.arg("/F");
+        let mut found = false;
+        for image in ["Antigravity.exe", "Antigravity IDE.exe"] {
+            let mut command = std::process::Command::new("taskkill");
+            command.args(["/IM", image, "/T"]);
+            if force {
+                command.arg("/F");
+            }
+            command.creation_flags(0x0800_0000);
+            found |= command.output()?.status.success();
         }
-        command.creation_flags(0x0800_0000);
-        command
-    };
+        Ok(found)
+    }
     #[cfg(not(windows))]
-    let mut command = {
+    {
         let mut command = std::process::Command::new("pkill");
         if force {
             command.args(["-9", "-f", "Antigravity[^/]*\\.app/Contents/"]);
         } else {
             command.args(["-f", "Antigravity[^/]*\\.app/Contents/MacOS/"]);
         }
-        command
-    };
-    Ok(command.output()?.status.success())
+        Ok(command.output()?.status.success())
+    }
 }
 
 /// Refreshes access token via Google OAuth token endpoint
@@ -895,11 +945,7 @@ pub fn detect_active_antigravity_session() -> AntigravityLiveSession {
 
     // Priority 2: OS credential store (when IDE is closed)
     if let Ok(Some(cred)) = read_system_antigravity_credential() {
-        let (email_opt, name_opt) = cred
-            .token
-            .id_token
-            .as_deref()
-            .and_then(parse_jwt_claims)
+        let (email_opt, name_opt) = payload_identity(&cred)
             .map(|(e, n)| (Some(e), n))
             .unwrap_or_else(|| fetch_google_account_info(&cred.token.access_token));
 
@@ -1258,7 +1304,7 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
         .ok_or_else(|| HubError::Operation("No Antigravity sign-in found on this computer. Please sign in to Antigravity first.".into()))?;
 
     let now = Utc::now().timestamp();
-    let mut details = cred.token;
+    let mut details = cred.token.clone();
 
     let expiry_ts = DateTime::parse_from_rfc3339(&details.expiry)
         .map(|dt| dt.timestamp())
@@ -1279,16 +1325,13 @@ pub fn capture_current_account(database: &Mutex<Database>) -> Result<Antigravity
             }
             let _ = write_system_antigravity_credential(&KeyringPayload {
                 token: details.clone(),
-                auth_method: cred.auth_method.clone(),
+                ..cred.clone()
             });
         }
     }
 
-    // 1. Try to get email and display name from ID token claims
-    let (mut email_opt, mut display_name) = details
-        .id_token
-        .as_deref()
-        .and_then(parse_jwt_claims)
+    // 1. Try to get email and display name from the stored sign-in (ID token or id_token_email)
+    let (mut email_opt, mut display_name) = payload_identity(&KeyringPayload { token: details.clone(), ..cred })
         .map(|(e, n)| (Some(e), n))
         .unwrap_or((None, None));
 
@@ -1425,6 +1468,8 @@ pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result
         auth_method: previous
             .as_ref()
             .map_or_else(|| "consumer".into(), |credential| credential.auth_method.clone()),
+        id_token_email: Some(account.email.clone()),
+        extra: carried_fields(previous.as_ref(), &account.email),
     };
 
     // 1. Write the sign-in where Antigravity reads it
@@ -1643,6 +1688,7 @@ mod tests {
                 expiry: "2026-10-17T00:00:00Z".into(), id_token: Some("new-id".into()), project_id: None,
             },
             auth_method: "consumer".into(),
+            ..Default::default()
         };
         let written = standalone_from_payload(Some(existing), &payload);
         assert_eq!(written["id_token"], "new-id");
@@ -1656,6 +1702,28 @@ mod tests {
 
         let without_id = KeyringPayload { token: KeyringTokenDetails { id_token: None, ..payload.token.clone() }, ..payload };
         assert!(standalone_from_payload(Some(written), &without_id).get("id_token").is_none());
+    }
+
+    #[test]
+    fn antigravity_232_credential_keeps_its_fields_and_names_the_new_account() {
+        // Shape Antigravity 2.32 writes to Credential Manager: no id_token, email beside the token.
+        let stored = r#"{"token":{"access_token":"a","token_type":"Bearer","refresh_token":"r","expiry":"2026-11-15T03:39:34Z","expires_in":3599},
+            "auth_method":"consumer","id_token_email":"old@example.com","writer_id":"w1","user_tier":"g1-pro-tier"}"#;
+        let previous: KeyringPayload = serde_json::from_str(stored).unwrap();
+        assert_eq!(payload_identity(&previous), Some(("old@example.com".into(), None)));
+
+        let same = carried_fields(Some(&previous), "OLD@example.com");
+        assert_eq!(same.get("user_tier").and_then(|v| v.as_str()), Some("g1-pro-tier"));
+
+        let switched = KeyringPayload {
+            id_token_email: Some("new@example.com".into()),
+            extra: carried_fields(Some(&previous), "new@example.com"),
+            ..previous.clone()
+        };
+        let written: serde_json::Value = serde_json::to_value(&switched).unwrap();
+        assert_eq!(written["writer_id"], "w1", "installation fields survive a switch");
+        assert_eq!(written["id_token_email"], "new@example.com");
+        assert!(written.get("user_tier").is_none(), "the old account's plan must not follow the new token");
     }
 
     #[test]
