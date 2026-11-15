@@ -265,7 +265,7 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         .ok_or_else(|| HubError::Operation("Open Antigravity and sign in to refresh Google usage".into()))?;
 
     let now = Utc::now().timestamp();
-    let mut details = cred.token;
+    let mut details = cred.token.clone();
     let mut access_token = details.access_token.clone();
 
     let expiry_ts = DateTime::parse_from_rfc3339(&details.expiry)
@@ -287,7 +287,7 @@ fn summary_from_vault() -> Result<ProviderSummary> {
                 .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
             let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
                 token: details.clone(),
-                auth_method: cred.auth_method.clone(),
+                ..cred.clone()
             });
         }
     }
@@ -299,7 +299,7 @@ fn summary_from_vault() -> Result<ProviderSummary> {
             details.access_token = token_resp.access_token;
             let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
                 token: details.clone(),
-                auth_method: cred.auth_method.clone(),
+                ..cred.clone()
             });
             usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
         }
@@ -309,7 +309,9 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         return Err(HubError::Operation("Antigravity returned no quota windows".into()));
     }
 
-    let (email, name) = crate::antigravity::fetch_google_account_info(&access_token);
+    let (email, name) = crate::antigravity::payload_identity(&cred)
+        .map(|(email, name)| (Some(email), name))
+        .unwrap_or_else(|| crate::antigravity::fetch_google_account_info(&access_token));
     let account_label = email.clone().or(name).unwrap_or_else(|| "Google account".into());
     let usage_allowed = usage.iter().filter_map(|u| u.value).any(|v| v > 0.0);
 

@@ -3,6 +3,20 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [0.1.26] - 2026-11-15
+
+- **Antigravity 2.32:** account switching keeps the sign-in Antigravity stores.
+  From 2.32 the app keeps it in Windows Credential Manager with an
+  `id_token_email` and fields of its own (`writer_id`, plan tier); the hub used
+  to rewrite the entry without them. A switch now keeps Antigravity's fields,
+  sets the email to the new account and drops the previous account's plan.
+- The old `jetski-standalone-oauth-token` file is only updated when it still
+  exists; the hub no longer creates it, since Antigravity 2.32 can restore its
+  sign-in from a leftover copy.
+- The signed-in email is read from the stored sign-in when there is no ID
+  token, instead of asking Google each time.
+- Close and force-close also end the separately installed Antigravity IDE.
+
 ## [0.1.25] - 2026-10-17
 
 - **Update button:** when GitHub has a newer release, the top bar offers it.
