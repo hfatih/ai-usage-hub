@@ -4,6 +4,7 @@ import { api } from "../lib/ipc";
 import { localizeValue, useTranslation } from "../i18n";
 import { PROVIDER_INITIALS, byProviderOrder } from "../lib/providers";
 import { useHub } from "../stores/hub";
+import { byPlatform } from "../lib/platform";
 import { KEYED_PROVIDERS, ProviderKeyForm } from "./integrations/ProviderKeyForm";
 
 const setupText: Record<string, string> = {
@@ -25,7 +26,7 @@ export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) =>
   if (!snapshot) return null;
 
   async function browse(appId: string) {
-    const path = await api.chooseExecutable(t("Windows applications"));
+    const path = await api.chooseExecutable(t(byPlatform("Windows applications", "Mac applications")));
     if (!path) return;
     await api.setExecutable(appId, path);
     await refresh();
@@ -64,7 +65,7 @@ export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) =>
         </div>
       </article>;
     })}</div>
-    <p className="page-note"><ShieldCheck size={13} />{t("Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this PC and sent only to their own provider.")} <button className="text-button" onClick={() => onNavigate("apps")}>{t("Manage application paths")}</button></p>
+    <p className="page-note"><ShieldCheck size={13} />{t(byPlatform("Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this PC and sent only to their own provider.", "Sign-ins of local apps are read in place, not copied. API keys you paste here are stored encrypted on this Mac and sent only to their own provider."))} <button className="text-button" onClick={() => onNavigate("apps")}>{t("Manage application paths")}</button></p>
   </section>;
 }
 

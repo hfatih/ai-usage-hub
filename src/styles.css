@@ -41,6 +41,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .window-titlebar__identity > * { pointer-events: none; }
 .window-titlebar__drag { flex: 1; height: 100%; }
 .window-titlebar__controls { display: flex; align-self: stretch; }
+.window-titlebar--mac .window-titlebar__identity { padding-left: 84px; }
 .window-titlebar__controls button { display: grid; width: 46px; place-items: center; border: 0; color: #dec5d2; background: transparent; cursor: pointer; }
 .window-titlebar__controls button:hover:not(:disabled) { color: #fff; background: rgba(217, 139, 176, .18); }
 .window-titlebar__controls .window-titlebar__close:hover:not(:disabled) { background: #9e496b; }

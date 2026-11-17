@@ -6,7 +6,11 @@ on:
 
 jobs:
   check:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,3 +22,22 @@ jobs:
       - run: npm run build
       - run: cargo test --locked
         working-directory: src-tauri
+
+  macos-bundle:
+    # An unsigned (ad-hoc signed) Apple Silicon build to try the Mac port; not a release.
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run tauri -- build --ci --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-usage-hub-macos-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

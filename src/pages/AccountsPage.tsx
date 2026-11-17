@@ -27,9 +27,13 @@ import { formatUsageValue, relativeTime, resetTime, shortResetTime, sourceLabel,
 import { localizeValue, useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
 import { api } from "../lib/ipc";
+import { byPlatform } from "../lib/platform";
 import { AccountProxyButton, AntigravityProcessButtons, ArgonQuotaChip, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
 
-const LINK_COPIED = "Sign-in link copied. Open it in any browser on this PC (Port 8045)";
+const LINK_COPIED = byPlatform(
+  "Sign-in link copied. Open it in any browser on this PC (Port 8045)",
+  "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
+);
 
 export function AccountsPage() {
   const { language, t } = useTranslation();

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
 import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
+import { isMac } from "./platform";
 
 const inTauri = () => "__TAURI_INTERNALS__" in window;
 
@@ -51,7 +52,9 @@ export const api = {
     inTauri() ? call("set_monitoring_paused", { paused }) : Promise.resolve(paused),
   chooseExecutable: async (filterName: string): Promise<string | null> => {
     if (!inTauri()) return null;
-    const result = await open({ multiple: false, filters: [{ name: filterName, extensions: ["exe"] }] });
+    const result = await open(isMac
+      ? { multiple: false, defaultPath: "/Applications", filters: [{ name: filterName, extensions: ["app"] }] }
+      : { multiple: false, filters: [{ name: filterName, extensions: ["exe"] }] });
     return typeof result === "string" ? result : null;
   },
   setExecutable: (appId: string, executablePath: string): Promise<void> =>
