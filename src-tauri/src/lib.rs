@@ -1,14 +1,7 @@
-mod cli_switch;
 mod google_control;
 mod google_browser;
 mod google_backups;
 mod google_commands;
-mod account_profiles;
-mod signin_page;
-mod codex_accounts;
-mod claude_login;
-mod signin_browser;
-mod codex_client;
 pub mod antigravity;
 mod commands;
 mod database;
@@ -49,8 +42,6 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_notification::NotificationExt;
 
 pub struct HubState {
-    pub(crate) claude_login: Mutex<Option<claude_login::Pending>>,
-    pub(crate) codex_accounts: Mutex<codex_accounts::Controller>,
     pub(crate) database: Mutex<Database>,
     pub(crate) detector: Mutex<ProcessDetector>,
     pub(crate) statuses: RwLock<Vec<AppStatus>>,
@@ -65,8 +56,6 @@ impl HubState {
     fn new(database: Database) -> Self {
         Self {
             database: Mutex::new(database),
-            claude_login: Mutex::new(None),
-            codex_accounts: Mutex::new(codex_accounts::Controller::default()),
             detector: Mutex::new(ProcessDetector::new()),
             statuses: RwLock::new(Vec::new()),
             providers: RwLock::new(providers::summaries()),
@@ -407,11 +396,6 @@ fn start_monitor(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Accepts an OAuth browser launch from a Claude Code process started by Hub.
-pub fn run_claude_browser_adapter() -> Option<bool> {
-    claude_login::run_browser_adapter()
-}
-
 pub fn run() {
     // Before any thread starts: a Finder-launched macOS app has no Homebrew/npm folders on PATH.
     platform::extend_search_path();
@@ -532,26 +516,6 @@ pub fn run() {
             google_commands::google_import_metadata,
             google_commands::google_create_backup,
             google_commands::google_restore_backup,
-            cli_switch::switch_account_profile,
-            account_profiles::get_account_profiles,
-            account_profiles::create_account_profile,
-            account_profiles::get_claude_profile_status,
-            claude_login::start_claude_profile_login,
-            claude_login::get_claude_login_url,
-            claude_login::copy_claude_login_url,
-            claude_login::open_claude_login,
-            claude_login::poll_claude_login,
-            claude_login::cancel_claude_login,
-            account_profiles::launch_account_profile,
-            codex_accounts::get_codex_accounts,
-            codex_accounts::start_codex_login,
-            codex_accounts::open_codex_login,
-            codex_accounts::get_codex_login_url,
-            codex_accounts::copy_codex_login_url,
-            codex_accounts::poll_codex_login,
-            codex_accounts::cancel_codex_login,
-            codex_accounts::switch_codex_account,
-            codex_accounts::hide_codex_account,
             commands::get_dashboard,
             commands::refresh_processes,
             commands::get_activity,

@@ -2,7 +2,7 @@
   "name": "ai-usage-hub",
   "private": true,
   "license": "GPL-3.0-only",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "type": "module",
   "scripts": {
     "dev": "vite",

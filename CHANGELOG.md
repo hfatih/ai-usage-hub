@@ -16,6 +16,14 @@ Rust crate, and Tauri bundle versions together.
 - macOS versions of the 0.1.24 Windows-only parts: Antigravity close and
   force-close through `pkill`, Copilot sign-in from `~/.config/github-copilot`,
   Cursor session from `~/Library/Application Support/Cursor`.
+## [0.2.3] - 2026-11-18
+
+- Remove Codex and Claude Code account switching, profile creation and Hub-managed
+  sign-in flows. Continue reading usage from each application's existing sign-in.
+
+## [0.2.2] - 2026-11-17
+
+- Add a copyable sign-in link while creating a new Codex or Claude Code profile.
 
 
 ## [0.2.1] - 2026-11-17

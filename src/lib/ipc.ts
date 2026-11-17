@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { version } from "../../package.json";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { CodexSession, CodexLoginInfo, AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, CliConfigStatus, DashboardSnapshot, ProxyModel, ProxyStatus, SecurityStatus, UsageHistoryPoint } from "../types";
 import { developmentAccounts, developmentAntigravityAccounts, developmentSecurity, developmentSettings, developmentSnapshot, developmentUsageHistory } from "./mock";
 import { isMac } from "./platform";
 
@@ -20,45 +20,7 @@ export interface UpdateInfo {
   canInstall: boolean;
 }
 
-export type AccountProfileProvider = "codex" | "claude";
-export interface ClaudeProfileStatus {
-  loggedIn: boolean;
-  email: string | null;
-  subscriptionType: string | null;
-}
-
 export const api = {
-  accountProfiles: (provider: AccountProfileProvider): Promise<string[]> =>
-    inTauri() ? call("get_account_profiles", { provider }) : Promise.resolve([]),
-  createAccountProfile: (provider: AccountProfileProvider, name: string): Promise<string> =>
-    call("create_account_profile", { provider, name }),
-  launchAccountProfile: (provider: AccountProfileProvider, name: string | null, directory: string): Promise<void> =>
-    call("launch_account_profile", { provider, name, directory }),
-  switchAccountProfile: (provider: AccountProfileProvider, name: string, expectedEmail: string): Promise<{ email: string; previousProfile: string | null }> =>
-    call("switch_account_profile", { provider, name, expectedEmail }),
-  chooseProjectFolder: async (): Promise<string | null> => {
-    if (!inTauri()) return null;
-    const folder = await open({ directory: true, multiple: false });
-    return typeof folder === "string" ? folder : null;
-  },
-  claudeProfileStatus: (name: string | null): Promise<ClaudeProfileStatus> =>
-    inTauri() ? call("get_claude_profile_status", { name }) : Promise.resolve({ loggedIn: false, email: null, subscriptionType: null }),
-  startClaudeProfileLogin: (name: string | null, openBrowser: boolean): Promise<CodexLoginInfo> =>
-    call("start_claude_profile_login", { name, openBrowser }),
-  getClaudeLoginUrl: (loginId: string): Promise<string> => call("get_claude_login_url", { loginId }),
-  copyClaudeLoginUrl: (loginId: string): Promise<void> => call("copy_claude_login_url", { loginId }),
-  openClaudeLogin: (loginId: string): Promise<void> => call("open_claude_login", { loginId }),
-  pollClaudeLogin: (loginId: string): Promise<ClaudeProfileStatus | null> => call("poll_claude_login", { loginId }),
-  cancelClaudeLogin: (loginId: string): Promise<void> => call("cancel_claude_login", { loginId }),
-  codexAccounts: (profile: string | null = null): Promise<CodexSession[]> => inTauri() ? call("get_codex_accounts", { profile }) : Promise.resolve([]),
-  startCodexLogin: (openBrowser = true, profile: string | null = null): Promise<CodexLoginInfo> => call("start_codex_login", { openBrowser, profile }),
-  getCodexLoginUrl: (loginId: string): Promise<string> => call("get_codex_login_url", { loginId }),
-  copyCodexLoginUrl: (loginId: string): Promise<void> => call("copy_codex_login_url", { loginId }),
-  openCodexLogin: (loginId: string): Promise<void> => call("open_codex_login", { loginId }),
-  pollCodexLogin: (loginId: string): Promise<CodexSession[] | null> => call("poll_codex_login", { loginId }),
-  cancelCodexLogin: (loginId: string): Promise<void> => call("cancel_codex_login", { loginId }),
-  switchCodexAccount: (sessionId: string, accountId: string, profile: string | null = null): Promise<CodexSession[]> => call("switch_codex_account", { sessionId, accountId, profile }),
-  hideCodexAccount: (sessionId: string, profile: string | null = null): Promise<CodexSession[]> => call("hide_codex_account", { sessionId, profile }),
   checkForUpdate: (): Promise<UpdateInfo> =>
     inTauri()
       ? call("check_for_update")

@@ -30,8 +30,6 @@ import { api } from "../lib/ipc";
 import { byPlatform } from "../lib/platform";
 import { AccountProxyButton, AntigravityProcessButtons, ArgonQuotaChip, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
 
-import { ClaudeAccounts } from "./accounts/ClaudeAccounts";
-import { CodexAccounts } from "./accounts/CodexAccounts";
 
 const LINK_COPIED = byPlatform(
   "Sign-in link copied. Open it in any browser on this PC (Port 8045)",
@@ -296,8 +294,6 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
 
   return (
     <section>
-      <CodexAccounts />
-      <ClaudeAccounts />
       {/* ANTIGRAVITY POOL & AUTO-SWITCHER SECTION */}
       <div className="page-heading">
         <div>

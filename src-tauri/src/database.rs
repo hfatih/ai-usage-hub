@@ -646,23 +646,6 @@ impl Database {
         Ok(())
     }
 
-    /// Hidden Codex session identifiers contain no authentication material.
-    pub(crate) fn hidden_codex_sessions(&self) -> Result<Vec<String>> {
-        let mut statement = self.connection.prepare("SELECT session_id FROM codex_hidden_sessions ORDER BY session_id")?;
-        let rows = statement.query_map([], |row| row.get(0))?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
-    }
-
-    /// Changes only Hub visibility; Codex continues to own the saved sign-in.
-    pub(crate) fn hide_codex_session(&self, session_id: &str, hidden: bool) -> Result<()> {
-        if hidden {
-            self.connection.execute("INSERT OR IGNORE INTO codex_hidden_sessions (session_id) VALUES (?1)", [session_id])?;
-        } else {
-            self.connection.execute("DELETE FROM codex_hidden_sessions WHERE session_id = ?1", [session_id])?;
-        }
-        Ok(())
-    }
-
     pub fn antigravity_accounts(&self) -> Result<Vec<AntigravityAccount>> {
         let mut stmt = self.connection.prepare(
             "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json, proxy_url, tier FROM antigravity_accounts ORDER BY is_current DESC, last_used DESC",
