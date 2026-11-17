@@ -19,3 +19,7 @@
 - 2026-10-12: New provider sources (v0.1.24): Gemini CLI (`providers/gemini_cli.rs`, `retrieveUserQuota`), GitHub Copilot (`providers/copilot.rs`, `copilot_internal/user`), Cursor (`providers/cursor.rs`, `usage-summary`, untested against a live install), and key-based DeepSeek / Kimi / Grok (`providers/keyed.rs`; keys in the `provider_keys` table, DPAPI-encrypted).
 - 2026-10-12: Proxy (v0.1.24): own account rotation without switching the IDE, account-risk gate, configurable port and timeout, background-task routing to Flash, image `size`/`quality`/`n`/suffix options, regex model rules, tier-priority strategy, per-account HTTP/SOCKS5 proxy. Pure routing decisions live in `src-tauri/src/routing/`.
 - 2026-10-12: One-click Claude Code / OpenCode connection (`src-tauri/src/cli_config/`), Antigravity close / force-close, pool sorting by model group, cURL and Python examples (v0.1.24).
+
+- 2026-11-16: Codex Account Switcher (v0.1.27): native `accountSession/list` / `accountSession/switch`, managed browser sign-in with poll/cancel/timeout, workspace and account verification, rollback, and metadata-only hidden sessions. Codex owns credentials and token renewal. The Hub does not stop desktop/CLI work; existing processes may need reopening.
+
+- 2026-11-16: Codex sign-in link copy (v0.1.28): start without opening the browser, copy the pending managed OAuth URL, retry copying while retaining the same callback/session.

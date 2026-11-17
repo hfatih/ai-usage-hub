@@ -691,6 +691,11 @@ pub fn refresh_all_accounts(database: &Mutex<Database>) -> Result<Vec<Antigravit
     let now = Utc::now().timestamp();
 
     for mut acc in accounts {
+        if !crate::google_control::native_account_enabled(&lock(database)?.connection, &acc.id)
+            .map_err(HubError::Operation)? {
+            updated.push(acc);
+            continue;
+        }
         // Accounts seen only through the live session have no token to ask Google with.
         if acc.refresh_token.is_empty() {
             updated.push(acc);
@@ -1343,6 +1348,10 @@ fn wait_for_live_email(timeout: Duration) -> Option<String> {
 /// and an error is returned. Can block for up to ~15 s; the database lock is not held meanwhile.
 pub fn switch_to_account(database: &Mutex<Database>, account_id: &str) -> Result<AntigravityAccount> {
     tracing::info!(account_id, "switch: requested");
+    if !crate::google_control::native_account_enabled(&lock(database)?.connection, account_id)
+        .map_err(HubError::Operation)? {
+        return Err(HubError::Operation("Enable this account in the Google control center before switching.".into()));
+    }
     let mut account = lock(database)?
         .antigravity_account(account_id)?
         .ok_or_else(|| HubError::Operation(format!("Account {} not found", account_id)))?;
@@ -1475,6 +1484,18 @@ pub fn calculate_health_score(quota_pct: Option<f64>, status: &str, last_used: i
     (base_quota * 0.85 + rest_bonus).clamp(0.0, 100.0)
 }
 
+fn auto_switch_pool(database: &Database) -> Result<(Vec<AntigravityAccount>, std::collections::HashSet<String>)> {
+    let accounts = database.antigravity_accounts()?;
+    let mut enabled = std::collections::HashSet::new();
+    for account in &accounts {
+        if crate::google_control::native_account_enabled(&database.connection, &account.id)
+            .map_err(HubError::Operation)? {
+            enabled.insert(account.id.clone());
+        }
+    }
+    Ok((accounts, enabled))
+}
+
 /// Evaluates if an auto-switch is needed and triggers it
 pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccount>> {
     let settings = state
@@ -1487,11 +1508,11 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
         return Ok(None);
     }
 
-    let accounts = state
-        .database
-        .lock()
-        .map_err(|_| HubError::Operation("database lock unavailable".into()))?
-        .antigravity_accounts()?;
+    let (accounts, enabled_ids) = {
+        let database = state.database.lock()
+            .map_err(|_| HubError::Operation("database lock unavailable".into()))?;
+        auto_switch_pool(&database)?
+    };
 
     if accounts.len() < 2 {
         return Ok(None); // Need at least 2 accounts to switch
@@ -1541,6 +1562,7 @@ pub fn check_and_auto_switch(state: &HubState) -> Result<Option<AntigravityAccou
         .iter()
         .filter(|a| {
             !a.is_current
+                && enabled_ids.contains(&a.id)
                 && !a.refresh_token.is_empty()
                 && !matches!(a.status.as_str(), "expired" | "rate_limited" | "forbidden")
                 && a.quota_remaining_percent.is_none_or(|q| q > threshold)
@@ -1848,5 +1870,34 @@ mod tests {
         let session = detect_active_antigravity_session();
         println!("DETECTED SESSION: {:?}", session);
         assert!(session.email.is_some());
+    }
+
+    #[test]
+    fn auto_switch_keeps_a_disabled_current_account_for_trigger_detection() {
+        let database = Database::memory().unwrap();
+        let mut current = pooled("healthy", 100, None);
+        current.id = "current".into();
+        current.email = "current@example.test".into();
+        current.is_current = true;
+        current.refresh_token = "fixture-current-refresh".into();
+        let mut candidate = pooled("healthy", 200, None);
+        candidate.id = "candidate".into();
+        candidate.email = "candidate@example.test".into();
+        candidate.quota_remaining_percent = Some(100.0);
+        candidate.refresh_token = "fixture-candidate-refresh".into();
+        database.save_antigravity_account(&current).unwrap();
+        database.save_antigravity_account(&candidate).unwrap();
+        let snapshot = crate::google_control::snapshot(&database.connection).unwrap();
+        let mut metadata = snapshot.accounts.iter().find(|account| account.email == current.email).unwrap().metadata.clone();
+        metadata.enabled = false;
+        crate::google_control::save_account(&database.connection, metadata).unwrap();
+        let (accounts, enabled) = auto_switch_pool(&database).unwrap();
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().any(|account| account.is_current && account.id == "current"));
+        assert!(!enabled.contains("current"));
+        assert!(enabled.contains("candidate"));
+        let candidates = accounts.iter().filter(|account| !account.is_current && enabled.contains(&account.id)).collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, "candidate");
     }
 }

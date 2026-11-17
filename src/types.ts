@@ -220,3 +220,18 @@ export interface ProxyStatus {
   recentLogs?: ProxyRequestLog[];
 }
 
+
+/** Native Codex saved-login metadata. Authentication material never crosses IPC. */
+export interface CodexSession {
+  sessionId: string;
+  email: string | null;
+  isActive: boolean;
+  lastUsedAt: number;
+  selectedWorkspaceAccountId: string | null;
+  workspaces: { accountId: string; name: string | null }[];
+}
+
+export interface CodexLoginInfo {
+  loginId: string;
+  browserOpened: boolean;
+}

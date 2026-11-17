@@ -1,3 +1,4 @@
+import { GoogleSummary } from "./GoogleControlPage";
 import { Fragment } from "react";
 import { Activity, ArrowRight, Clock3, Pause, Play, ShieldCheck, Users } from "lucide-react";
 import type { PageId } from "../components/AppShell";
@@ -44,6 +45,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: PageId) => vo
       <section className="dashboard-account-list">
         {groupedAccounts.length ? groupedAccounts.map((account, index) => <Fragment key={account.id}>{groupedAccounts[index - 1]?.providerId !== account.providerId && <span className="eyebrow provider-group-title">{account.providerName}</span>}<button onClick={() => onNavigate("accounts")} className="dashboard-account-row"><span className={`provider-logo provider-logo--${account.providerId}`}>{PROVIDER_INITIALS[account.providerId] ?? account.providerName.slice(0, 1)}</span><div><strong>{account.email}</strong><small>{account.providerName} · {account.connectionStatus === "connected" ? t("Active") : t("Last known {time}", { time: relativeTime(account.lastRefresh) })}</small></div><div className="dashboard-account-metrics">{account.usage.slice(0, 4).map((usage) => <span key={usage.metric}><strong>{formatUsageValue(usage)}</strong><small>{localizeValue(usage.label, language)}</small></span>)}</div></button></Fragment>) : <div className="glass-panel empty-inline"><Users size={18} />{t("Accounts appear here after the first successful provider refresh.")}</div>}
       </section>
+      <GoogleSummary onOpen={() => onNavigate("google")} />
       <div className="privacy-footer"><ShieldCheck size={15} /><span>{t("Usage fields stay empty until a documented provider source is connected.")}</span></div>
     </>
   );

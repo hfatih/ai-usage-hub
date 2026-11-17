@@ -75,6 +75,15 @@ Ekran görüntüleri uygulamanın yerleşik önizleme verisiyle alınmıştır (
 - Kota belirlediğiniz eşiğin altına düştüğünde yerel uyarı, isterseniz Windows bildirimi.
 - Her yapay zekâ uygulamasının bugün ve bu hafta ne kadar açık kaldığını izler.
 
+### Codex hesap değiştirici
+
+**Hesaplar** sayfasında her hesap için bir kez **ChatGPT ile giriş yap** seçilir.
+Hub Codex’in kayıtlı oturumlarını listeler; çalışma alanını seçip elle geçiş
+yapabilirsiniz. Giriş bilgilerini ve yenilemeyi Codex yönetir; Hub Codex tokenı
+saklamaz. Native hesap oturumlarını destekleyen Codex gerekir (0.167.0-alpha.3.2
+ile doğrulandı). Eski hesap görünüyorsa masaüstü uygulamasını yeniden açın veya
+yeni CLI oturumu başlatın. **Hub’dan gizle** yalnız listeyi etkiler; giriş Codex’te kalır.
+
 ### Antigravity hesap havuzu
 
 - **Canlı oturum algılama:** çalışan Antigravity dil sunucusuna hangi hesabın açık olduğunu sorar; IDE kapalıyken Windows Kimlik Yöneticisi'ne ve Antigravity'nin yerel durumuna bakar.

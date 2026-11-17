@@ -751,10 +751,10 @@ fn execute_upstream_request(
 /// Retrieves an active account from the pool, proactively refreshing expired OAuth tokens
 fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
     let db = state.database.lock().map_err(|_| "Database lock error".to_string())?;
-    let accounts = db.antigravity_accounts().map_err(|e| e.to_string())?;
+    let accounts = db.eligible_antigravity_accounts().map_err(|e| e.to_string())?;
 
     if accounts.is_empty() {
-        return Err("No Antigravity accounts registered in AI Usage Hub pool. Please sign in or import an account.".into());
+        return Err("No enabled Antigravity accounts are available. Enable an account in the Google control center.".into());
     }
 
     let settings = db.settings().unwrap_or_default();

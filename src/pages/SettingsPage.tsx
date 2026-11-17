@@ -1,5 +1,6 @@
 import { LaptopMinimal, Moon, Power, Save, Sliders, SunMoon, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
+import { UpdateButton } from "../components/UpdateButton";
 import { useHub } from "../stores/hub";
 import { useTranslation } from "../i18n";
 import type { AppSettings } from "../types";
@@ -38,6 +39,8 @@ export function SettingsPage() {
           </button>
         </aside>
         <div className="settings-panel glass-panel">
+          <UpdateButton settings />
+          <div className="settings-group-title">{t("General")}</div>
           <div className="settings-section">
             <div>
               <Power size={19} />

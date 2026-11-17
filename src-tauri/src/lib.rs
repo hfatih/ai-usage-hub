@@ -1,3 +1,14 @@
+mod cli_switch;
+mod google_control;
+mod google_browser;
+mod google_backups;
+mod google_commands;
+mod account_profiles;
+mod signin_page;
+mod codex_accounts;
+mod claude_login;
+mod signin_browser;
+mod codex_client;
 pub mod antigravity;
 mod commands;
 mod database;
@@ -36,6 +47,8 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_notification::NotificationExt;
 
 pub struct HubState {
+    pub(crate) claude_login: Mutex<Option<claude_login::Pending>>,
+    pub(crate) codex_accounts: Mutex<codex_accounts::Controller>,
     pub(crate) database: Mutex<Database>,
     pub(crate) detector: Mutex<ProcessDetector>,
     pub(crate) statuses: RwLock<Vec<AppStatus>>,
@@ -50,6 +63,8 @@ impl HubState {
     fn new(database: Database) -> Self {
         Self {
             database: Mutex::new(database),
+            claude_login: Mutex::new(None),
+            codex_accounts: Mutex::new(codex_accounts::Controller::default()),
             detector: Mutex::new(ProcessDetector::new()),
             statuses: RwLock::new(Vec::new()),
             providers: RwLock::new(providers::summaries()),
@@ -326,8 +341,17 @@ fn show_new_alerts(app: &tauri::AppHandle, state: &HubState, before: i64) {
 fn start_monitor(app: tauri::AppHandle) {
     thread::spawn(move || {
       let mut last_pool_refresh: Option<Instant> = None;
+      let mut last_google_maintenance: Option<Instant> = None;
       loop {
         let state = app.state::<HubState>();
+        if last_google_maintenance.is_none_or(|last| last.elapsed() >= Duration::from_secs(600)) {
+            let google_alerts_before = latest_alert_id(&state);
+            last_google_maintenance = Some(Instant::now());
+            if let Err(error) = google_commands::maintenance(&state) {
+                tracing::warn!(%error, "Google account maintenance failed");
+            }
+            show_new_alerts(&app, &state, google_alerts_before);
+        }
         // Pull real quota for every pooled account from Google every ten minutes, so the
         // accounts that are not open in the IDE do not sit on stale numbers.
         if last_pool_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(600)) {
@@ -356,7 +380,10 @@ fn start_monitor(app: tauri::AppHandle) {
                     let _ = app.emit("hub://status-changed", ());
                 }
             }
-            Err(error) => tracing::warn!(%error, "background refresh failed"),
+            Err(error) => {
+                show_new_alerts(&app, &state, alerts_before);
+                tracing::warn!(%error, "background refresh failed");
+            }
         }
         if let Ok(Some(switched)) = antigravity::check_and_auto_switch(&app.state::<HubState>()) {
             tracing::info!(account = %switched.email, "Antigravity auto-switched account");
@@ -378,6 +405,11 @@ fn start_monitor(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Accepts an OAuth browser launch from a Claude Code process started by Hub.
+pub fn run_claude_browser_adapter() -> Option<bool> {
+    claude_login::run_browser_adapter()
+}
+
 pub fn run() {
     let log_file = std::env::var_os("LOCALAPPDATA").and_then(|appdata| {
         let dir = std::path::PathBuf::from(appdata).join("AI Usage Hub");
@@ -481,6 +513,41 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            google_commands::google_control_snapshot,
+            google_commands::google_save_account,
+            google_commands::google_remove_account,
+            google_commands::google_save_project,
+            google_commands::google_delete_project,
+            google_commands::google_add_usage,
+            google_commands::google_delete_usage,
+            google_commands::google_launch_service,
+            google_commands::google_set_service_status,
+            google_commands::google_favorite_service,
+            google_commands::google_save_preferences,
+            google_commands::google_export_metadata,
+            google_commands::google_import_metadata,
+            google_commands::google_create_backup,
+            google_commands::google_restore_backup,
+            cli_switch::switch_account_profile,
+            account_profiles::get_account_profiles,
+            account_profiles::create_account_profile,
+            account_profiles::get_claude_profile_status,
+            claude_login::start_claude_profile_login,
+            claude_login::get_claude_login_url,
+            claude_login::copy_claude_login_url,
+            claude_login::open_claude_login,
+            claude_login::poll_claude_login,
+            claude_login::cancel_claude_login,
+            account_profiles::launch_account_profile,
+            codex_accounts::get_codex_accounts,
+            codex_accounts::start_codex_login,
+            codex_accounts::open_codex_login,
+            codex_accounts::get_codex_login_url,
+            codex_accounts::copy_codex_login_url,
+            codex_accounts::poll_codex_login,
+            codex_accounts::cancel_codex_login,
+            codex_accounts::switch_codex_account,
+            codex_accounts::hide_codex_account,
             commands::get_dashboard,
             commands::refresh_processes,
             commands::get_activity,
@@ -503,6 +570,7 @@ pub fn run() {
             commands::toggle_antigravity_auto_switch,
             commands::check_for_update,
             commands::install_update,
+            commands::open_update_releases,
             commands::get_antigravity_oauth_url,
             commands::start_antigravity_oauth_login,
             commands::complete_antigravity_oauth_code,

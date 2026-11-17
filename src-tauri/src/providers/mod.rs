@@ -1,10 +1,10 @@
-mod anthropic;
+pub(crate) mod anthropic;
 mod copilot;
 mod cursor;
 mod gemini_cli;
 pub(crate) mod google;
 pub(crate) mod keyed;
-mod openai;
+pub(crate) mod openai;
 mod opencode;
 
 use std::{

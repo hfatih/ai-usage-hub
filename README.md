@@ -75,6 +75,15 @@ Screenshots use the app's built-in preview data.
 - Local alerts when a quota drops below your thresholds, with optional Windows notifications.
 - Tracks how long each AI app has been open today and this week.
 
+### Codex account switcher
+
+On **Accounts**, use **Sign in with ChatGPT** once for each account. Hub reads
+Codex's saved sessions, lets you choose a workspace and verifies a manual switch.
+Credentials and renewal stay with Codex; Hub stores no Codex tokens. Requires a
+Codex version supporting native account sessions (tested with 0.167.0-alpha.3.2).
+Reopen the desktop app or start a new CLI session if it still shows the old account.
+**Hide from Hub** only hides the entry; the sign-in remains saved in Codex.
+
 ### Antigravity account pool
 
 - **Live session detection:** asks the running Antigravity language server which account is signed in; falls back to Windows Credential Manager and Antigravity's local state when the IDE is closed.
