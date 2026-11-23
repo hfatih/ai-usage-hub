@@ -19,7 +19,7 @@
     <img src="https://img.shields.io/badge/UI-React%2019%20%2B%20TypeScript-3178C6?logo=typescript&style=flat-square" alt="React + TS">
     <img src="https://img.shields.io/badge/Depolama-SQLite%20WAL-003B57?logo=sqlite&style=flat-square" alt="SQLite WAL">
     <img src="https://img.shields.io/badge/Telemetri-Sıfır%20%2F%20%25100%20Yerel-10B981?style=flat-square" alt="Sıfır Telemetri">
-    <img src="https://img.shields.io/badge/Lisans-MIT-blue?style=flat-square" alt="MIT Lisansı">
+    <img src="https://img.shields.io/badge/Lisans-GPL--3.0-blue?style=flat-square" alt="GPL-3.0-only">
   </p>
   <p align="center">
     <img src="https://hits.sh/github.com/hfatih/ai-usage-hub.svg?style=flat-square&label=g%C3%B6r%C3%BCnt%C3%BClenme&color=e7a0b9" alt="Views">
@@ -235,6 +235,8 @@ cargo test --locked
 
 ## Lisans ve yasal uyarı
 
-Bu proje [MIT Lisansı](LICENSE) kapsamında yayımlanmıştır.
+Bu proje [GNU GPL v3.0](LICENSE) kapsamında yayımlanmıştır.
 
 AI Usage Hub bağımsız bir açık kaynak projesidir; Google, OpenAI veya Anthropic ile bağlantısı yoktur. Belgelenmemiş yerel ve dahili arayüzlere dayanır; bunlar haber verilmeden değişebilir. Ürün adları ilgili sahiplerinin ticari markalarıdır.
+
+Bu sürümde bize ait kod ve özgün içerik [GNU GPL v3.0](LICENSE) (GPL-3.0-only) altında yayımlanır. Üçüncü taraf kod, yazı tipleri, görseller, veriler ve marka öğeleri kendi lisans ve atıflarına tabidir. [Önceki lisans ve telif bildirimi](licenses/previous-license.txt).
