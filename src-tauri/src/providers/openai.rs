@@ -291,7 +291,7 @@ fn query_codex() -> Result<(AccountResponse, Option<RateLimitsResponse>)> {
     )))
 }
 
-fn codex_candidates() -> Vec<PathBuf> {
+pub(crate) fn codex_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = env::var_os("AI_USAGE_HUB_CODEX_EXECUTABLE") {
         candidates.push(PathBuf::from(path));

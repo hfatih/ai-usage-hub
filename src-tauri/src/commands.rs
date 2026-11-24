@@ -335,11 +335,15 @@ pub fn check_for_update() -> Result<crate::updater::UpdateInfo> {
 
 /// Starts the verified installer and exits so it can replace the running files.
 #[tauri::command(async)]
-pub fn install_update(app: tauri::AppHandle) -> Result<()> {
-    if crate::updater::install()? {
-        app.exit(0);
-    }
+pub fn install_update(app: tauri::AppHandle, expected_version: String) -> Result<()> {
+    crate::updater::install(&expected_version)?;
+    app.exit(0);
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_update_releases() -> Result<()> {
+    crate::updater::open_releases()
 }
 
 #[tauri::command]

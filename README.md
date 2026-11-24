@@ -20,7 +20,7 @@
     <img src="https://img.shields.io/badge/UI-React%2019%20%2B%20TypeScript-3178C6?logo=typescript&style=flat-square" alt="React + TS">
     <img src="https://img.shields.io/badge/Storage-SQLite%20WAL-003B57?logo=sqlite&style=flat-square" alt="SQLite WAL">
     <img src="https://img.shields.io/badge/Telemetry-Zero%20%2F%20100%25%20Local-10B981?style=flat-square" alt="Zero Telemetry">
-    <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License MIT">
+    <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="GPL-3.0-only">
   </p>
   <p align="center">
     <img src="https://hits.sh/github.com/hfatih/ai-usage-hub.svg?style=flat-square&label=views&color=e7a0b9" alt="Views">
@@ -75,6 +75,15 @@ Screenshots use the app's built-in preview data.
 - Every value is labeled *Official*, *Local*, *Calculated* or *Unavailable*. The app does not show a number it could not read.
 - Local alerts when a quota drops below your thresholds, with optional Windows notifications.
 - Tracks how long each AI app has been open today and this week.
+
+### Codex account switcher
+
+On **Accounts**, use **Sign in with ChatGPT** once for each account. Hub reads
+Codex's saved sessions, lets you choose a workspace and verifies a manual switch.
+Credentials and renewal stay with Codex; Hub stores no Codex tokens. Requires a
+Codex version supporting native account sessions (tested with 0.167.0-alpha.3.2).
+Reopen the desktop app or start a new CLI session if it still shows the old account.
+**Hide from Hub** only hides the entry; the sign-in remains saved in Codex.
 
 ### Antigravity account pool
 
@@ -256,6 +265,8 @@ Each push to this branch also builds a `.dmg` for Apple Silicon in GitHub Action
 
 ## License and disclaimer
 
-Released under the [MIT License](LICENSE).
+Released under the [GNU GPL v3.0](LICENSE).
 
 AI Usage Hub is an independent open-source project and is not affiliated with Google, OpenAI or Anthropic. It relies on undocumented local and internal interfaces that can change without notice. Product names are trademarks of their respective owners.
+
+Project-owned code and original material in this revision are licensed under [GNU GPL v3.0](LICENSE) (GPL-3.0-only). Third-party code, fonts, imagery, data, and brand assets retain their own terms and attributions. [Previous license and copyright notice](licenses/previous-license.txt).

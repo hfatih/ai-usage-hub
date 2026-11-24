@@ -6,6 +6,7 @@ import {
   ChartNoAxesCombined,
   CircleUserRound,
   Gauge,
+  Globe2,
   LayoutGrid,
   RefreshCw,
   Server,
@@ -18,10 +19,11 @@ import { useHub } from "../stores/hub";
 import { localizeValue, useTranslation } from "../i18n";
 import { UpdateButton } from "./UpdateButton";
 
-export type PageId = "dashboard" | "accounts" | "proxy" | "apps" | "usage" | "activity" | "notifications" | "integrations" | "security" | "settings";
+export type PageId = "dashboard" | "google" | "accounts" | "proxy" | "apps" | "usage" | "activity" | "notifications" | "integrations" | "security" | "settings";
 
 const navItems: Array<{ id: PageId; label: string; icon: typeof Gauge }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
+  { id: "google", label: "Google & Antigravity", icon: Globe2 },
   { id: "accounts", label: "Accounts", icon: UserRoundCog },
   { id: "proxy", label: "API Proxy", icon: Server },
   { id: "apps", label: "Apps", icon: Boxes },

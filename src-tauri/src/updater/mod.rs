@@ -2,11 +2,9 @@
 //!
 //! `check` compares the latest published release with the running version. `install` downloads
 //! the Windows setup EXE, refuses it unless its SHA-256 matches the release's `SHA256SUMS.txt`,
-//! starts it and lets the caller exit so the installer can replace the files. On macOS an update is
-//! offered only when the release carries a `.dmg`, and installing opens the release page, because
-//! an unsigned bundle has to be installed by hand.
+//! starts it and lets the caller exit so the installer can replace the files.
 
-use std::{io::Read, path::PathBuf, time::Duration};
+use std::{io::Read, path::PathBuf, sync::Mutex, time::Duration};
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -16,6 +14,7 @@ use crate::error::{HubError, Result};
 
 const REPOSITORY: &str = "hfatih/ai-usage-hub";
 const CHECKSUMS_ASSET: &str = "SHA256SUMS.txt";
+static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
 /// What the interface needs to offer an update.
 #[derive(Debug, Clone, Serialize)]
@@ -25,9 +24,10 @@ pub struct UpdateInfo {
     pub latest_version: String,
     pub available: bool,
     pub release_url: String,
-    /// The installer for this system (`-setup.exe` on Windows, `.dmg` on macOS); `None` when the
-    /// release has none.
-    pub installer_name: Option<String>,
+    /// The installer for this system; `None` when the release has none (macOS installs by hand).
+    #[serde(skip)]
+    installer_name: Option<String>,
+    pub can_install: bool,
     #[serde(skip)]
     installer_url: Option<String>,
     #[serde(skip)]
@@ -59,7 +59,9 @@ fn client(timeout: Duration) -> Result<Client> {
 /// Asks GitHub for the latest release and compares it with this build's version.
 pub fn check() -> Result<UpdateInfo> {
     let release: Release = client(Duration::from_secs(12))?
-        .get(format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"))
+        .get(format!(
+            "https://api.github.com/repos/{REPOSITORY}/releases/latest"
+        ))
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
         .and_then(|response| response.error_for_status())
@@ -69,24 +71,27 @@ pub fn check() -> Result<UpdateInfo> {
     Ok(info_from_release(release, env!("CARGO_PKG_VERSION"), cfg!(windows)))
 }
 
-/// `windows` picks the installer to look for. Elsewhere a release without a `.dmg` is not offered
-/// at all: it holds only the Windows build, so pointing a Mac at it would be no update.
 fn info_from_release(release: Release, current: &str, windows: bool) -> UpdateInfo {
     let latest = release.tag_name.trim_start_matches('v').to_owned();
     let suffix = if windows { "-setup.exe" } else { ".dmg" };
-    let installer = release
-        .assets
-        .iter()
-        .find(|asset| asset.name.ends_with(suffix) && is_release_download(&asset.browser_download_url));
-    let checksums = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == CHECKSUMS_ASSET && is_release_download(&asset.browser_download_url));
+    let installer = release.assets.iter().find(|asset| {
+        asset.name.ends_with(suffix)
+            && asset
+                .name
+                .bytes()
+                .all(|ch| ch.is_ascii_alphanumeric() || b" -_.".contains(&ch))
+            && !asset.name.starts_with([' ', '.'])
+            && is_release_download(&asset.browser_download_url)
+    });
+    let checksums = release.assets.iter().find(|asset| {
+        asset.name == CHECKSUMS_ASSET && is_release_download(&asset.browser_download_url)
+    });
     UpdateInfo {
         available: is_newer(&latest, current) && (windows || installer.is_some()),
         current_version: current.to_owned(),
         latest_version: latest,
         release_url: release.html_url,
+        can_install: cfg!(windows) && installer.is_some() && checksums.is_some(),
         installer_name: installer.map(|asset| asset.name.clone()),
         installer_url: installer.map(|asset| asset.browser_download_url.clone()),
         checksums_url: checksums.map(|asset| asset.browser_download_url.clone()),
@@ -95,7 +100,9 @@ fn info_from_release(release: Release, current: &str, windows: bool) -> UpdateIn
 
 /// Only files published under this repository's releases are ever downloaded.
 fn is_release_download(url: &str) -> bool {
-    url.starts_with(&format!("https://github.com/{REPOSITORY}/releases/download/"))
+    url.starts_with(&format!(
+        "https://github.com/{REPOSITORY}/releases/download/"
+    ))
 }
 
 /// Numeric comparison of dotted versions (`0.1.10` > `0.1.9`); any pre-release suffix is ignored.
@@ -112,41 +119,60 @@ fn is_newer(latest: &str, current: &str) -> bool {
     parts(latest) > parts(current)
 }
 
-/// Windows: downloads and verifies the installer, then starts it. Returns `true` when the
-/// installer was started and the app should exit. Elsewhere opens the release page and
-/// returns `false`.
-pub fn install() -> Result<bool> {
+/// Downloads and verifies the approved Windows release before launching its installer.
+pub fn install(expected_version: &str) -> Result<()> {
+    let _install = INSTALL_LOCK
+        .try_lock()
+        .map_err(|_| HubError::Operation("An update is already being installed".into()))?;
     let info = check()?;
-    if !info.available {
-        return Err(HubError::Operation(format!("AI Usage Hub {} is already the latest version", info.current_version)));
-    }
-    if !cfg!(windows) {
-        open_in_browser(&info.release_url)?;
-        return Ok(false);
-    }
-    let (Some(name), Some(url)) = (info.installer_name.as_deref(), info.installer_url.as_deref()) else {
-        return Err(HubError::Operation("The latest release has no Windows installer".into()));
+    validate_install(&info, expected_version)?;
+    let (Some(name), Some(url)) = (
+        info.installer_name.as_deref(),
+        info.installer_url.as_deref(),
+    ) else {
+        return Err(HubError::Operation(
+            "The latest release has no Windows installer".into(),
+        ));
     };
-    let checksums_url = info
-        .checksums_url
-        .as_deref()
-        .ok_or_else(|| HubError::Operation("The latest release has no SHA256SUMS.txt, so the installer cannot be verified".into()))?;
+    let checksums_url = info.checksums_url.as_deref().ok_or_else(|| {
+        HubError::Operation(
+            "The latest release has no SHA256SUMS.txt, so the installer cannot be verified".into(),
+        )
+    })?;
 
     let http = client(Duration::from_secs(300))?;
     let checksums = download(&http, checksums_url)?;
-    let expected = expected_checksum(&String::from_utf8_lossy(&checksums), name)
-        .ok_or_else(|| HubError::Operation(format!("SHA256SUMS.txt lists no checksum for {name}")))?;
+    let expected =
+        expected_checksum(&String::from_utf8_lossy(&checksums), name).ok_or_else(|| {
+            HubError::Operation(format!("SHA256SUMS.txt lists no checksum for {name}"))
+        })?;
     let installer = download(&http, url)?;
     let actual = hex(&Sha256::digest(&installer));
     if !actual.eq_ignore_ascii_case(&expected) {
-        return Err(HubError::Operation(format!("{name} failed its checksum check and was not run")));
+        return Err(HubError::Operation(format!(
+            "{name} failed its checksum check and was not run"
+        )));
     }
 
     let path = update_dir()?.join(name);
     std::fs::write(&path, &installer)?;
     tracing::info!(version = %info.latest_version, path = %path.display(), "starting verified update installer");
     std::process::Command::new(&path).spawn()?;
-    Ok(true)
+    Ok(())
+}
+
+fn validate_install(info: &UpdateInfo, expected_version: &str) -> Result<()> {
+    if !info.available || info.latest_version != expected_version {
+        return Err(HubError::Operation(
+            "The available release changed. Check for updates again.".into(),
+        ));
+    }
+    if !info.can_install {
+        return Err(HubError::Operation(
+            "No verified installer is available for this system".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn download(http: &Client, url: &str) -> Result<Vec<u8>> {
@@ -177,8 +203,8 @@ fn update_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn open_in_browser(url: &str) -> Result<()> {
-    crate::platform::open_url(url)?;
+pub fn open_releases() -> Result<()> {
+    crate::platform::open_url(&format!("https://github.com/{REPOSITORY}/releases"))?;
     Ok(())
 }
 
@@ -206,7 +232,32 @@ mod tests {
             expected_checksum(list, "AI-Usage-Hub_0.1.25_x64-setup.exe").as_deref(),
             Some("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")
         );
-        assert_eq!(expected_checksum(list, "other.exe"), None, "a short hash is not a SHA-256");
+        assert_eq!(
+            expected_checksum(list, "other.exe"),
+            None,
+            "a short hash is not a SHA-256"
+        );
+    }
+
+    #[test]
+    fn install_requires_the_confirmed_newer_release_and_verification_assets() {
+        let mut info = UpdateInfo {
+            current_version: "0.2.0".into(),
+            latest_version: "0.2.1".into(),
+            available: true,
+            release_url: String::new(),
+            can_install: true,
+            installer_name: None,
+            installer_url: None,
+            checksums_url: None,
+        };
+        assert!(validate_install(&info, "0.2.1").is_ok());
+        assert!(validate_install(&info, "0.2.2").is_err());
+        info.can_install = false;
+        assert!(validate_install(&info, "0.2.1").is_err());
+        info.can_install = true;
+        info.available = false;
+        assert!(validate_install(&info, "0.2.1").is_err());
     }
 
     #[test]
@@ -235,13 +286,22 @@ mod tests {
             tag_name: "v0.1.30".into(),
             html_url: "https://github.com/hfatih/ai-usage-hub/releases/tag/v0.1.30".into(),
             assets: vec![
-                Asset { name: "Evil-setup.exe".into(), browser_download_url: "https://example.com/Evil-setup.exe".into() },
-                Asset { name: "SHA256SUMS.txt".into(), browser_download_url: format!("https://github.com/{REPOSITORY}/releases/download/v0.1.30/SHA256SUMS.txt") },
+                Asset {
+                    name: "Evil-setup.exe".into(),
+                    browser_download_url: "https://example.com/Evil-setup.exe".into(),
+                },
+                Asset {
+                    name: "SHA256SUMS.txt".into(),
+                    browser_download_url: format!(
+                        "https://github.com/{REPOSITORY}/releases/download/v0.1.30/SHA256SUMS.txt"
+                    ),
+                },
             ],
         };
         let info = info_from_release(release, "0.1.24", true);
         assert!(info.available);
         assert_eq!(info.installer_name, None);
+        assert!(!info.can_install);
         assert!(info.checksums_url.is_some());
     }
 }

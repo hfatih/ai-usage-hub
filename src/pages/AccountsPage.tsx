@@ -30,12 +30,15 @@ import { api } from "../lib/ipc";
 import { byPlatform } from "../lib/platform";
 import { AccountProxyButton, AntigravityProcessButtons, ArgonQuotaChip, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
 
+import { ClaudeAccounts } from "./accounts/ClaudeAccounts";
+import { CodexAccounts } from "./accounts/CodexAccounts";
+
 const LINK_COPIED = byPlatform(
   "Sign-in link copied. Open it in any browser on this PC (Port 8045)",
   "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
 );
 
-export function AccountsPage() {
+export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: string) => void } = {}) {
   const { language, t } = useTranslation();
   const {
     accounts,
@@ -293,11 +296,14 @@ export function AccountsPage() {
 
   return (
     <section>
+      <CodexAccounts />
+      <ClaudeAccounts />
       {/* ANTIGRAVITY POOL & AUTO-SWITCHER SECTION */}
       <div className="page-heading">
         <div>
           <span className="eyebrow">{t("Auto-Switcher")}</span>
           <h1>{t("Antigravity Account Pool")}</h1>
+          {onManageGoogle && <button type="button" className="text-button" onClick={() => onManageGoogle()}>{t("Google control center")}</button>}
           <p>{t("Auto-switch accounts when quota runs low or rate limits occur.")}</p>
         </div>
         <div className="hero-actions">
@@ -695,6 +701,11 @@ export function AccountsPage() {
                     {account.isCurrent ? t("Active now") : `${t("Last known snapshot")} · ${relativeTime(account.lastUsed)}`}
                   </span>
                   <AccountProxyButton account={account} />
+                  {onManageGoogle && (
+                    <button type="button" className="icon-button" title={t("Manage Google account")} aria-label={`${t("Manage Google account")} · ${account.email}`} onClick={() => onManageGoogle(account.email)}>
+                      <LayoutGrid size={14} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="danger-button"
@@ -801,6 +812,11 @@ export function AccountsPage() {
                     <td>
                       <div className="table-actions">
                         <AccountProxyButton account={account} compact />
+                        {onManageGoogle && (
+                          <button type="button" className="icon-button" title={t("Manage Google account")} aria-label={`${t("Manage Google account")} · ${account.email}`} onClick={() => onManageGoogle(account.email)}>
+                            <LayoutGrid size={14} />
+                          </button>
+                        )}
                         {!account.isCurrent && (
                           <button
                             type="button"

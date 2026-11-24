@@ -1,8 +1,8 @@
 {
   "name": "ai-usage-hub",
   "private": true,
-  "license": "MIT",
-  "version": "0.1.26",
+  "license": "GPL-3.0-only",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

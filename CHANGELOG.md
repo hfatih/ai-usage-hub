@@ -17,6 +17,105 @@ Rust crate, and Tauri bundle versions together.
   force-close through `pkill`, Copilot sign-in from `~/.config/github-copilot`,
   Cursor session from `~/Library/Application Support/Cursor`.
 
+
+## [0.2.1] - 2026-11-17
+
+- Add GitHub release checks in Settings with installed and published versions,
+  a clear status when no update is available, and verified Windows installation.
+
+## [0.2.0] - 2026-11-17
+
+- Add a Google control center linked to existing Antigravity accounts, with
+  account metadata, subscriptions, tags, groups, favorites and archive controls.
+- Launch eight Google services in persistent, isolated Chrome or Edge profiles.
+  Remember each service's last account and track user-confirmed availability.
+- Organize projects with account roles and services, record clearly labeled
+  manual usage, and show observed native Antigravity quota history.
+- Add credential-free JSON/CSV metadata transfer, full SQLite backups and
+  verified restoration, daily automatic backups and subscription notifications.
+- Integrate navigation, dashboard summary, native account management links,
+  keyboard search and the saved light/dark/system theme.
+- Preserve renewed CLI credentials, keep removed accounts hidden across profile
+  changes, reconcile failed switch responses, and verify Codex workspace identity.
+- Respect disabled Google accounts in native Antigravity/proxy selection while
+  retaining the real current account for automatic-switch trigger detection.
+
+## [0.1.35] - 2026-11-17
+
+- Apply account-card switching to the default Codex or Claude Code CLI login.
+  Preserve the previous account in a profile, verify the CLI identity, and
+  restore the previous login if verification fails.
+- Show the actual active CLI account, consolidate duplicate accounts, and
+  present unfinished sign-ins separately from connected account cards.
+- Align account-pool search and primary actions with view and sorting controls
+  on a separate row.
+
+## [0.1.34] - 2026-11-16
+
+- Remove and restore Codex and Claude Code cards in their Hub account pools.
+  The provider's saved sign-in stays available to the CLI.
+
+## [0.1.33] - 2026-11-16
+
+- Show saved Codex and Claude Code profiles in Antigravity-style account
+  pools with side-by-side cards, list view, search, sorting, and refresh.
+- Select a profile or open its CLI from the card, with plan and saved quota
+  details when available.
+
+## [0.1.32] - 2026-11-16
+
+- Add **Sign in with Google** and **Copy sign-in link** for Claude Code profiles.
+  Continue with Google on Claude's official sign-in page. Claude Code receives
+  its own callback, and Hub's local tab shows the verified result in that browser.
+- Starting from a signed-in Claude profile creates a separate local profile.
+  Copying the link leaves the browser closed until the link is opened.
+
+## [0.1.31] - 2026-11-16
+
+- Copy a local Codex sign-in page that can be opened in the browser of your
+  choice. It shows the verified result in that browser, with no new browser
+  launch from Hub after sign-in.
+- Start additional sign-ins in a fresh profile even when a named profile is
+  selected. List the saved profiles and their account emails together.
+  Explain when a browser signs in with an email already used by another profile.
+
+## [0.1.30] - 2026-11-16
+
+- Keep Codex sign-in and copy-link available when the default profile is already
+  signed in. Create a new profile for the additional account and retain the
+  existing default login. Fall back to the native Windows clipboard when the
+  WebView clipboard is unavailable.
+- Wait for Claude Code sign-in and verify the selected profile automatically.
+  Surface failed or cancelled sign-in and cap the wait.
+
+## [0.1.29] - 2026-11-16
+
+- Add separate local profiles for different Codex and Claude Code accounts.
+  Add a profile, sign in to it once and launch the CLI in the selected project.
+  Codex's native workspace switching remains available within each account.
+- After verified Codex or Claude Code sign-in, open a separate browser tab
+  with Hub's star-themed confirmation.
+
+## [0.1.28] - 2026-11-16
+
+- **Copy Codex sign-in link:** starts a managed browser sign-in without opening
+  the default browser, then copies its link for any browser on the same PC.
+  The pending sign-in also offers copy/retry without starting another login.
+  Clipboard failures keep the pending sign-in available.
+
+## [0.1.27] - 2026-11-16
+
+- **Codex Account Switcher:** sign in once with ChatGPT, list saved local
+  accounts, choose a workspace and switch through Codex's native account API.
+  Codex retains and renews credentials; Hub never copies or exports its tokens.
+- A switch checks the selected login, workspace and signed-in account. Failed
+  verification attempts to restore the previous selection and reports failures.
+- Browser sign-in supports cancellation and timeout. Hiding an inactive account
+  affects only Hub; its saved sign-in remains in Codex.
+- Requires a Codex version supporting `accountSession/list` and
+  `accountSession/switch` (verified with 0.167.0-alpha.3.2). Reopen the desktop
+  app or start a new CLI session if an existing process still shows the old account.
+
 ## [0.1.26] - 2026-11-15
 
 - **Antigravity 2.32:** account switching keeps the sign-in Antigravity stores.

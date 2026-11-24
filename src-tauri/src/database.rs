@@ -18,8 +18,8 @@ use crate::{
 const PLAIN_TOKEN_FILTER: &str = "(access_token <> '' AND access_token NOT LIKE 'dpapi:%' AND access_token NOT LIKE 'keychain:%') OR (refresh_token <> '' AND refresh_token NOT LIKE 'dpapi:%' AND refresh_token NOT LIKE 'keychain:%') OR (COALESCE(id_token, '') <> '' AND id_token NOT LIKE 'dpapi:%' AND id_token NOT LIKE 'keychain:%')";
 
 pub struct Database {
-    connection: Connection,
-    path: Option<PathBuf>,
+    pub(crate) connection: Connection,
+    pub(crate) path: Option<PathBuf>,
 }
 
 impl Database {
@@ -46,13 +46,16 @@ impl Database {
         Ok(database)
     }
 
-    fn migrate(&mut self) -> Result<()> {
+    pub(crate) fn migrate(&mut self) -> Result<()> {
         self.connection.execute_batch(
             r#"
             PRAGMA foreign_keys = ON;
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
 
+            CREATE TABLE IF NOT EXISTS codex_hidden_sessions (
+                session_id TEXT PRIMARY KEY
+            );
             CREATE TABLE IF NOT EXISTS providers (
                 id TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
@@ -178,6 +181,8 @@ impl Database {
             [],
         )?;
         self.encrypt_legacy_tokens()?;
+        crate::google_control::migrate(&self.connection).map_err(crate::error::HubError::Operation)?;
+        self.connection.execute_batch("CREATE TABLE IF NOT EXISTS google_expiry_notices(account_id TEXT NOT NULL, expiration TEXT NOT NULL, period TEXT NOT NULL, PRIMARY KEY(account_id,expiration,period));")?;
         // Rows written before 0.1.19 that were never real readings: the image-generation row
         // copied the Gemini percentage and the credit row held the usage threshold.
         self.connection.execute(
@@ -208,7 +213,7 @@ impl Database {
         Ok(())
     }
 
-    fn seed(&mut self) -> Result<()> {
+    pub(crate) fn seed(&mut self) -> Result<()> {
         let tx = self.connection.transaction()?;
         for (id, name) in [
             ("openai", "ChatGPT / Codex"),
@@ -533,7 +538,7 @@ impl Database {
 
     pub fn notifications(&self, limit: usize) -> Result<Vec<ActivityEvent>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, event_type, title, detail, severity, created_at FROM activity_events WHERE event_type LIKE 'usage_%' OR event_type = 'provider_error' ORDER BY created_at DESC LIMIT ?1",
+            "SELECT id, event_type, title, detail, severity, created_at FROM activity_events WHERE event_type LIKE 'usage_%' OR event_type = 'provider_error' OR event_type = 'google_subscription_expiry' ORDER BY created_at DESC LIMIT ?1",
         )?;
         let rows = statement.query_map([limit as i64], activity_from_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -641,6 +646,23 @@ impl Database {
         Ok(())
     }
 
+    /// Hidden Codex session identifiers contain no authentication material.
+    pub(crate) fn hidden_codex_sessions(&self) -> Result<Vec<String>> {
+        let mut statement = self.connection.prepare("SELECT session_id FROM codex_hidden_sessions ORDER BY session_id")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Changes only Hub visibility; Codex continues to own the saved sign-in.
+    pub(crate) fn hide_codex_session(&self, session_id: &str, hidden: bool) -> Result<()> {
+        if hidden {
+            self.connection.execute("INSERT OR IGNORE INTO codex_hidden_sessions (session_id) VALUES (?1)", [session_id])?;
+        } else {
+            self.connection.execute("DELETE FROM codex_hidden_sessions WHERE session_id = ?1", [session_id])?;
+        }
+        Ok(())
+    }
+
     pub fn antigravity_accounts(&self) -> Result<Vec<AntigravityAccount>> {
         let mut stmt = self.connection.prepare(
             "SELECT id, email, display_name, access_token, refresh_token, id_token, project_id, expiry_timestamp, status, is_current, last_used, quota_remaining_percent, quota_details_json, proxy_url, tier FROM antigravity_accounts ORDER BY is_current DESC, last_used DESC",
@@ -665,6 +687,17 @@ impl Database {
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub(crate) fn eligible_antigravity_accounts(&self) -> Result<Vec<AntigravityAccount>> {
+        let mut eligible = Vec::new();
+        for account in self.antigravity_accounts()? {
+            if crate::google_control::native_account_enabled(&self.connection, &account.id)
+                .map_err(crate::error::HubError::Operation)? {
+                eligible.push(account);
+            }
+        }
+        Ok(eligible)
     }
 
     pub fn antigravity_account(&self, id: &str) -> Result<Option<AntigravityAccount>> {
