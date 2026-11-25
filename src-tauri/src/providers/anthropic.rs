@@ -222,8 +222,8 @@ impl CachedClaudeUsage {
 }
 
 fn desktop_usage(expected_organization: Option<&str>) -> Option<CachedClaudeUsage> {
-    let app_data = env::var_os("APPDATA")?;
-    let bytes = fs::read(PathBuf::from(app_data).join("Claude/plan-usage-history.json")).ok()?;
+    let app_data = crate::platform::app_data_dir()?;
+    let bytes = fs::read(app_data.join("Claude/plan-usage-history.json")).ok()?;
     desktop_usage_from_bytes(&bytes, expected_organization)
 }
 
@@ -299,12 +299,12 @@ fn inferred_resets(
 }
 
 fn recent_claude_tokens(now: i64) -> i64 {
-    let Some(home) = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME")) else {
+    let Some(home) = crate::platform::home_dir() else {
         return 0;
     };
     let cutoff = now.saturating_sub(86_400);
     let mut messages = HashMap::new();
-    super::recent_jsonl_files(&PathBuf::from(home).join(".claude/projects"), cutoff)
+    super::recent_jsonl_files(&home.join(".claude/projects"), cutoff)
         .into_iter()
         .filter_map(|path| fs::File::open(path).ok())
         .map(BufReader::new)
@@ -365,8 +365,7 @@ struct CachedClaudeAccount {
 }
 
 fn cached_account() -> Option<CachedClaudeAccount> {
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
-    let home = PathBuf::from(home);
+    let home = crate::platform::home_dir()?;
     let profile = read_json(&home.join(".claude.json"));
     cached_account_from_value(profile.as_ref())
 }
@@ -446,8 +445,8 @@ fn query_auth_status() -> Result<Value> {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
-        match command.output() {
-            Ok(output) => match serde_json::from_slice::<Value>(&output.stdout) {
+        match output_with_timeout(command, AUTH_STATUS_TIMEOUT) {
+            Ok(stdout) => match serde_json::from_slice::<Value>(&stdout) {
                 Ok(value) => return Ok(value),
                 Err(error) => errors.push(format!("{}: {error}", executable.display())),
             },
@@ -463,17 +462,57 @@ fn query_auth_status() -> Result<Value> {
     )))
 }
 
-pub(crate) fn claude_candidates() -> Vec<PathBuf> {
+/// How long `claude auth status` may take. It runs on every provider refresh, and a CLI that
+/// hangs (an update prompt, a network stall) must not stall every later refresh with it.
+const AUTH_STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Runs `command` and returns its standard output, killing it if it outlives `timeout`.
+fn output_with_timeout(mut command: Command, timeout: std::time::Duration) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut child = command.spawn()?;
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(stdout) = stdout.as_mut() {
+            let _ = stdout.read_to_end(&mut bytes);
+        }
+        bytes
+    });
+    // Drained so a chatty CLI cannot block on a full stderr pipe.
+    let mut stderr = child.stderr.take();
+    std::thread::spawn(move || {
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = std::io::copy(stderr, &mut std::io::sink());
+        }
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    reader.join().map_err(|_| std::io::Error::other("output reader failed"))
+}
+
+fn claude_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = env::var_os("AI_USAGE_HUB_CLAUDE_EXECUTABLE") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(app_data) = env::var_os("APPDATA") {
-        let root = PathBuf::from(app_data).join("Claude/claude-code");
+    let claude = crate::platform::executable_name("claude");
+    // Claude Desktop keeps its bundled Claude Code under its data folder, one folder per version.
+    if let Some(app_data) = crate::platform::app_data_dir() {
+        let root = app_data.join("Claude/claude-code");
         if let Ok(entries) = fs::read_dir(root) {
             let mut installed: Vec<_> = entries
                 .flatten()
-                .map(|entry| entry.path().join("claude.exe"))
+                .map(|entry| entry.path().join(&claude))
                 .filter(|path| path.is_file())
                 .collect();
             installed.sort_by_key(|path| fs::metadata(path).and_then(|item| item.modified()).ok());
@@ -481,9 +520,15 @@ pub(crate) fn claude_candidates() -> Vec<PathBuf> {
             candidates.extend(installed);
         }
     }
-    if let Some(user_profile) = env::var_os("USERPROFILE") {
-        candidates.push(PathBuf::from(user_profile).join(".local/bin/claude.exe"));
+    if let Some(home) = crate::platform::home_dir() {
+        candidates.push(home.join(".local/bin").join(&claude));
     }
+    candidates.extend(
+        crate::platform::extra_bin_dirs()
+            .into_iter()
+            .map(|dir| dir.join(&claude))
+            .filter(|path| path.is_file()),
+    );
     candidates.push(PathBuf::from("claude"));
     candidates.dedup();
     candidates

@@ -7,6 +7,12 @@ ending in `-setup.exe` and a `SHA256SUMS.txt` listing its hash
 (`<sha256> *<file name>`). Without a matching checksum the app refuses to run
 the download. The tag (`vX.Y.Z`) must be newer than the installed version.
 
+Mac users are offered an update only when the release also attaches a `.dmg`
+(for example the `ai-usage-hub-macos-dmg` artifact that CI builds from the
+`macos` branch); a release with only the Windows installer stays invisible to
+them. The Mac button opens the release page, since the unsigned app is
+replaced by hand.
+
 1. Update the same version in `package.json`, `package-lock.json`,
    `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`.
 2. Describe the change in [CHANGELOG.md](CHANGELOG.md).

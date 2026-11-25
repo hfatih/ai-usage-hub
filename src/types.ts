@@ -221,17 +221,9 @@ export interface ProxyStatus {
 }
 
 
-/** Native Codex saved-login metadata. Authentication material never crosses IPC. */
-export interface CodexSession {
-  sessionId: string;
-  email: string | null;
-  isActive: boolean;
-  lastUsedAt: number;
-  selectedWorkspaceAccountId: string | null;
-  workspaces: { accountId: string; name: string | null }[];
-}
-
-export interface CodexLoginInfo {
-  loginId: string;
-  browserOpened: boolean;
+/** Recent readings of one metric of one saved account, oldest first, as `[timestamp, value]`. */
+export interface UsageTrend {
+  accountId: string;
+  metric: string;
+  points: Array<[number, number]>;
 }

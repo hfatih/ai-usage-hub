@@ -3,16 +3,16 @@ import { api } from "../lib/ipc";
 import { useTranslation } from "../i18n";
 import { formatClock, formatDuration, relativeTime } from "../lib/format";
 import { useHub } from "../stores/hub";
+import { byPlatform } from "../lib/platform";
 
 export function AppsPage() {
   const { t } = useTranslation();
-  const { snapshot, refresh } = useHub();
+  const { snapshot } = useHub();
 
   async function browse(appId: string) {
-    const path = await api.chooseExecutable(t("Windows applications"));
+    const path = await api.chooseExecutable(t(byPlatform("Windows applications", "Mac applications")));
     if (!path) return;
-    await api.setExecutable(appId, path);
-    await refresh();
+    await useHub.getState().setExecutable(appId, path);
   }
 
   return (
@@ -27,7 +27,7 @@ export function AppsPage() {
             <span>{formatDuration(app.todaySeconds)}</span>
             <span>{relativeTime(app.lastUsedAt)}</span>
             <span className="path-label" title={app.executablePath ?? t("Not configured")}>{app.executablePath ?? t("Not configured")}</span>
-            <div className="row-actions"><button className="icon-button" title={t("Choose executable")} onClick={() => void browse(app.id)}><FolderSearch size={16} /></button><button className="icon-button" title={t("Open {name}", { name: app.displayName })} disabled={!app.launchable} onClick={() => void api.launchApp(app.id)}><ExternalLink size={16} /></button></div>
+            <div className="row-actions"><button className="icon-button" title={t("Choose executable")} onClick={() => void browse(app.id)}><FolderSearch size={16} /></button><button className="icon-button" title={t("Open {name}", { name: app.displayName })} disabled={!app.launchable} onClick={() => void useHub.getState().launchApp(app.id)}><ExternalLink size={16} /></button></div>
           </div>
         ))}
         {!snapshot?.applications.length && <div className="empty-state"><MonitorDot size={28} /><strong>{t("No applications configured")}</strong></div>}

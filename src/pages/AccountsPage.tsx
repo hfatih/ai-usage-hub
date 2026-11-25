@@ -27,12 +27,14 @@ import { formatUsageValue, relativeTime, resetTime, shortResetTime, sourceLabel,
 import { localizeValue, useTranslation } from "../i18n";
 import { useHub } from "../stores/hub";
 import { api } from "../lib/ipc";
-import { AccountProxyButton, AntigravityProcessButtons, ArgonQuotaChip, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
+import { byPlatform } from "../lib/platform";
+import { AccountProxyButton, AntigravityProcessButtons, ArgonQuotaChip, ResetStatusButton, sortPoolAccounts, tierLabel } from "./accounts/PoolAccountExtras";
 
-import { ClaudeAccounts } from "./accounts/ClaudeAccounts";
-import { CodexAccounts } from "./accounts/CodexAccounts";
 
-const LINK_COPIED = "Sign-in link copied. Open it in any browser on this PC (Port 8045)";
+const LINK_COPIED = byPlatform(
+  "Sign-in link copied. Open it in any browser on this PC (Port 8045)",
+  "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
+);
 
 export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: string) => void } = {}) {
   const { language, t } = useTranslation();
@@ -292,8 +294,6 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
 
   return (
     <section>
-      <CodexAccounts />
-      <ClaudeAccounts />
       {/* ANTIGRAVITY POOL & AUTO-SWITCHER SECTION */}
       <div className="page-heading">
         <div>
@@ -608,6 +608,10 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
                         <>
                           <ShieldCheck size={11} /> {t("Rate limited")}
                         </>
+                      ) : account.status === "expired" ? (
+                        <span style={{ color: "#fbbf24", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                          <Clock3 size={11} /> {t("Expired")}
+                        </span>
                       ) : (
                         <>
                           <ShieldCheck size={11} /> {t("Healthy")}
@@ -696,6 +700,7 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
                     <Clock3 size={12} />
                     {account.isCurrent ? t("Active now") : `${t("Last known snapshot")} · ${relativeTime(account.lastUsed)}`}
                   </span>
+                  <ResetStatusButton account={account} />
                   <AccountProxyButton account={account} />
                   {onManageGoogle && (
                     <button type="button" className="icon-button" title={t("Manage Google account")} aria-label={`${t("Manage Google account")} · ${account.email}`} onClick={() => onManageGoogle(account.email)}>
@@ -762,6 +767,10 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
                         <span className="status-badge status-badge--limited">
                           {t("Rate limited")}
                         </span>
+                      ) : account.status === "expired" ? (
+                        <span className="status-badge status-badge--limited">
+                          {t("Expired")}
+                        </span>
                       ) : (
                         <span className="status-badge status-badge--healthy">
                           {t("Healthy")}
@@ -807,6 +816,7 @@ export function AccountsPage({ onManageGoogle }: { onManageGoogle?: (email?: str
                     </td>
                     <td>
                       <div className="table-actions">
+                        <ResetStatusButton account={account} compact />
                         <AccountProxyButton account={account} compact />
                         {onManageGoogle && (
                           <button type="button" className="icon-button" title={t("Manage Google account")} aria-label={`${t("Manage Google account")} · ${account.email}`} onClick={() => onManageGoogle(account.email)}>

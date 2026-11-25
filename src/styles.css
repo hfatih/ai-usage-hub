@@ -41,6 +41,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .window-titlebar__identity > * { pointer-events: none; }
 .window-titlebar__drag { flex: 1; height: 100%; }
 .window-titlebar__controls { display: flex; align-self: stretch; }
+.window-titlebar--mac .window-titlebar__identity { padding-left: 84px; }
 .window-titlebar__controls button { display: grid; width: 46px; place-items: center; border: 0; color: #dec5d2; background: transparent; cursor: pointer; }
 .window-titlebar__controls button:hover:not(:disabled) { color: #fff; background: rgba(217, 139, 176, .18); }
 .window-titlebar__controls .window-titlebar__close:hover:not(:disabled) { background: #9e496b; }
@@ -999,55 +1000,6 @@ select option { color: var(--text); background: #1f1018; }
 .update-settings-actions > button { height: 34px; padding: 0 12px; }
 .update-settings-actions > button:disabled { opacity: .55; cursor: not-allowed; }
 
-/* Codex uses the same account-card material as the existing pool. */
-.codex-switcher { margin-bottom: 36px; }
-.codex-switcher .page-heading { margin-bottom: 12px; }
-.codex-privacy { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; }
-.codex-banner { padding: 12px 16px; margin: 12px 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: rgba(231,160,185,.08); overflow-wrap: anywhere; }
-.codex-banner--error { border-color: rgba(239,113,141,.45); color: #ffc3d0; }
-.codex-login { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 18px; margin-bottom: 18px; }
-.codex-empty { padding: 24px; color: var(--muted); }
-.codex-workspace { display: grid; gap: 6px; margin: 14px 18px; color: var(--muted); font-size: 11px; }
-.codex-workspace select { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: #281922; }
-.codex-workspace select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-
-.cli-profiles { padding: 14px 18px; margin-bottom: 12px; }
-.cli-profile-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; }
-.cli-profile-actions .codex-workspace { margin: 0; min-width: min(230px, 100%); }
-.cli-profile-actions input { border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; color: var(--text); background: #281922; }
-
-.cli-pool-toolbar { display: grid; grid-template-columns: minmax(160px, 1fr) auto; align-items: center; gap: 12px; margin: 18px 0; }
-.cli-pool-primary-actions, .cli-pool-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.cli-pool-primary-actions { justify-content: flex-end; }
-.cli-pool-filters { grid-column: 1 / -1; }
-.cli-pool-search { position: relative; display: flex; align-items: center; flex: 1 1 190px; max-width: 300px; color: var(--muted); }
-.cli-pool-search svg { position: absolute; left: 10px; pointer-events: none; }
-.cli-pool-search .search-input { width: 100%; min-width: 0; padding-left: 32px; }
-.cli-pool-sort { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-.cli-pool-sort select { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: #281922; color: var(--text); }
-.cli-profile-grid--list { grid-template-columns: minmax(0, 1fr); }
-.cli-profile-card > header, .cli-profile-card > footer { flex-wrap: wrap; }
-.cli-profile-card > header > div { flex-basis: 110px; }
-.cli-profile-card > footer > span { font-size: 10px; }
-.cli-card-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
-.cli-profile-card .connection-pill { flex: 0 0 auto; }
-.cli-quota-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.cli-card-workspaces { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
-.cli-card-workspaces .codex-workspace { flex: 1 1 140px; min-width: 0; margin: 0; }
-.cli-profile-error { color: var(--danger); overflow-wrap: anywhere; }
-
-@media (max-width: 680px) {
-  .cli-profile-grid { grid-template-columns: minmax(0, 1fr); }
-  .cli-pool-toolbar { grid-template-columns: minmax(0, 1fr); }
-  .cli-pool-primary-actions { justify-content: flex-start; }
-}
-
-.cli-pool-drafts { display: grid; gap: 8px; margin-top: 16px; color: var(--muted); font-size: 11px; }
-.cli-draft-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
-.cli-draft-row > span:first-child { flex: 1; }
-.cli-draft-row > span[role=alert] { flex-basis: 100%; color: var(--danger); overflow-wrap: anywhere; }
-
-
 :root[data-theme="light"] {
   color-scheme: light;
   color: #34212d;
@@ -1098,3 +1050,8 @@ select option { color: var(--text); background: #1f1018; }
 :root[data-theme="light"] .text-button:hover:not(:disabled) { color: var(--text); background: rgba(155, 63, 109, .1); }
 :root[data-theme="light"] select option { background: var(--panel-solid); color: var(--text); }
 :root[data-theme="light"] .eyebrow { color: var(--brand); }
+
+/* Usage trend line (last 24 hours) on the Usage page cards. */
+.usage-sparkline { display: block; width: 100%; height: 28px; margin: 4px 0 2px; overflow: visible; }
+.usage-sparkline-line { fill: none; stroke: var(--brand); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.usage-sparkline-fill { fill: var(--brand); opacity: .08; stroke: none; }

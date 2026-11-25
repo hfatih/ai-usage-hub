@@ -1,5 +1,5 @@
 //! GitHub Copilot usage. Uses the sign-in the Copilot editor plugins keep in
-//! `%LOCALAPPDATA%\github-copilot` and the account endpoint those plugins call for their own
+//! `github-copilot` folder (see `copilot_config_dir`) and the account endpoint those plugins call for their own
 //! quota display. The endpoint is not publicly documented, so rows carry medium confidence.
 
 use std::{path::PathBuf, time::Duration};
@@ -69,9 +69,22 @@ pub fn capabilities() -> ProviderCapabilities {
     }
 }
 
+/// The plugins' shared sign-in folder: `%LOCALAPPDATA%\github-copilot` on Windows,
+/// `$XDG_CONFIG_HOME/github-copilot` (or `~/.config/github-copilot`) on macOS and Linux.
+fn copilot_config_dir() -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| crate::platform::home_dir().map(|home| home.join(".config")))?
+    };
+    Some(base.join("github-copilot"))
+}
+
 /// `(GitHub login, OAuth token)` from the plugins' `apps.json` or the older `hosts.json`.
 fn stored_sign_in() -> Option<(Option<String>, String)> {
-    let root = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("github-copilot");
+    let root = copilot_config_dir()?;
     ["apps.json", "hosts.json"].iter().find_map(|file| {
         let entries: Value = serde_json::from_str(&std::fs::read_to_string(root.join(file)).ok()?).ok()?;
         sign_in_from_entries(&entries)

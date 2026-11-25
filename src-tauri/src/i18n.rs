@@ -31,6 +31,15 @@ pub fn running_tooltip(count: usize, language: &str) -> String {
     }
 }
 
+/// Desktop toast after Antigravity was switched to another pool account automatically.
+pub fn auto_switch_text(email: &str, language: &str) -> (String, String) {
+    if language == "tr" {
+        ("Antigravity hesabı değiştirildi".into(), format!("Kota azaldığı için {email} hesabına otomatik geçildi."))
+    } else {
+        ("Antigravity account switched".into(), format!("Quota ran low, so Antigravity now uses {email}."))
+    }
+}
+
 /// Wording for a desktop toast built from a stored (English) usage alert.
 pub fn alert_text(title: &str, detail: Option<&str>, language: &str) -> (String, String) {
     let detail = detail.unwrap_or_default();

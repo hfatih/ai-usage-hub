@@ -68,13 +68,14 @@ pub fn check() -> Result<UpdateInfo> {
         .map_err(operation)?
         .json()
         .map_err(operation)?;
-    Ok(info_from_release(release, env!("CARGO_PKG_VERSION")))
+    Ok(info_from_release(release, env!("CARGO_PKG_VERSION"), cfg!(windows)))
 }
 
-fn info_from_release(release: Release, current: &str) -> UpdateInfo {
+fn info_from_release(release: Release, current: &str, windows: bool) -> UpdateInfo {
     let latest = release.tag_name.trim_start_matches('v').to_owned();
+    let suffix = if windows { "-setup.exe" } else { ".dmg" };
     let installer = release.assets.iter().find(|asset| {
-        asset.name.ends_with("-setup.exe")
+        asset.name.ends_with(suffix)
             && asset
                 .name
                 .bytes()
@@ -86,7 +87,7 @@ fn info_from_release(release: Release, current: &str) -> UpdateInfo {
         asset.name == CHECKSUMS_ASSET && is_release_download(&asset.browser_download_url)
     });
     UpdateInfo {
-        available: is_newer(&latest, current),
+        available: is_newer(&latest, current) && (windows || installer.is_some()),
         current_version: current.to_owned(),
         latest_version: latest,
         release_url: release.html_url,
@@ -203,7 +204,8 @@ fn update_dir() -> Result<PathBuf> {
 }
 
 pub fn open_releases() -> Result<()> {
-    crate::signin_page::open_browser(&format!("https://github.com/{REPOSITORY}/releases"))
+    crate::platform::open_url(&format!("https://github.com/{REPOSITORY}/releases"))?;
+    Ok(())
 }
 
 fn operation(error: impl std::fmt::Display) -> HubError {
@@ -259,6 +261,26 @@ mod tests {
     }
 
     #[test]
+    fn macs_are_offered_only_releases_with_a_dmg() {
+        let release = |assets: &[&str]| Release {
+            tag_name: "v0.1.30".into(),
+            html_url: "https://github.com/hfatih/ai-usage-hub/releases/tag/v0.1.30".into(),
+            assets: assets
+                .iter()
+                .map(|name| Asset {
+                    name: (*name).into(),
+                    browser_download_url: format!("https://github.com/{REPOSITORY}/releases/download/v0.1.30/{name}"),
+                })
+                .collect(),
+        };
+        let windows_only = info_from_release(release(&["AI-Usage-Hub_0.1.30_x64-setup.exe"]), "0.1.24", false);
+        assert!(!windows_only.available);
+        let with_dmg = info_from_release(release(&["AI-Usage-Hub_0.1.30_x64-setup.exe", "AI-Usage-Hub_0.1.30_aarch64.dmg"]), "0.1.24", false);
+        assert!(with_dmg.available);
+        assert_eq!(with_dmg.installer_name.as_deref(), Some("AI-Usage-Hub_0.1.30_aarch64.dmg"));
+    }
+
+    #[test]
     fn only_this_repository_assets_are_offered() {
         let release = Release {
             tag_name: "v0.1.30".into(),
@@ -276,7 +298,7 @@ mod tests {
                 },
             ],
         };
-        let info = info_from_release(release, "0.1.24");
+        let info = info_from_release(release, "0.1.24", true);
         assert!(info.available);
         assert_eq!(info.installer_name, None);
         assert!(!info.can_install);

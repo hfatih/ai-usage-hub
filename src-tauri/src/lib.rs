@@ -1,22 +1,17 @@
-mod cli_switch;
 mod google_control;
 mod google_browser;
 mod google_backups;
 mod google_commands;
-mod account_profiles;
-mod signin_page;
-mod codex_accounts;
-mod claude_login;
-mod signin_browser;
-mod codex_client;
 pub mod antigravity;
 mod commands;
 mod database;
 mod detector;
 mod error;
 mod i18n;
+mod keychain;
 mod models;
 pub mod proxy;
+pub mod platform;
 mod cli_config;
 mod providers;
 mod routing;
@@ -47,8 +42,6 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_notification::NotificationExt;
 
 pub struct HubState {
-    pub(crate) claude_login: Mutex<Option<claude_login::Pending>>,
-    pub(crate) codex_accounts: Mutex<codex_accounts::Controller>,
     pub(crate) database: Mutex<Database>,
     pub(crate) detector: Mutex<ProcessDetector>,
     pub(crate) statuses: RwLock<Vec<AppStatus>>,
@@ -63,8 +56,6 @@ impl HubState {
     fn new(database: Database) -> Self {
         Self {
             database: Mutex::new(database),
-            claude_login: Mutex::new(None),
-            codex_accounts: Mutex::new(codex_accounts::Controller::default()),
             detector: Mutex::new(ProcessDetector::new()),
             statuses: RwLock::new(Vec::new()),
             providers: RwLock::new(providers::summaries()),
@@ -268,10 +259,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 let _ = app.emit("hub://navigate", "settings");
             }
             "refresh" => {
-                let state = app.state::<HubState>();
-                if refresh_all(&state, true).is_ok() {
-                    let _ = app.emit("hub://status-changed", ());
-                }
+                // A forced refresh calls the providers over the network; doing it here would
+                // freeze the tray and the window until every provider has answered.
+                let app = app.clone();
+                thread::spawn(move || {
+                    if refresh_all(&app.state::<HubState>(), true).is_ok() {
+                        let _ = app.emit("hub://status-changed", ());
+                    }
+                });
             }
             "pause" => {
                 let state = app.state::<HubState>();
@@ -287,7 +282,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             id if id.starts_with("launch:") => {
                 let state = app.state::<HubState>();
-                if let Err(error) = commands::launch(&state, &id[7..]) {
+                if let Err(error) = commands::launch(&state, &id["launch:".len()..]) {
                     tracing::warn!(%error, "tray launch failed");
                 }
             }
@@ -320,7 +315,7 @@ fn latest_alert_id(state: &HubState) -> i64 {
         .unwrap_or(0)
 }
 
-/// Raises a Windows toast for each usage alert recorded since `before` (at most three per pass),
+/// Raises a desktop notification for each usage alert recorded since `before` (at most three per pass),
 /// so a low quota is noticed while the window is hidden in the tray.
 fn show_new_alerts(app: &tauri::AppHandle, state: &HubState, before: i64) {
     let Ok(db) = state.database.lock() else { return };
@@ -389,6 +384,14 @@ fn start_monitor(app: tauri::AppHandle) {
             tracing::info!(account = %switched.email, "Antigravity auto-switched account");
             let _ = app.emit("hub://status-changed", ());
             let _ = app.emit("hub://antigravity-switched", &switched);
+            // The window is usually hidden in the tray when this happens; say so on the desktop.
+            let settings = app.state::<HubState>().database.lock().ok().and_then(|db| db.settings().ok());
+            if let Some(settings) = settings.filter(|settings| settings.desktop_notifications && settings.notifications_enabled) {
+                let (title, body) = i18n::auto_switch_text(&switched.email, &settings.language);
+                if let Err(error) = app.notification().builder().title(title).body(body).show() {
+                    tracing::warn!(%error, "could not show auto-switch notification");
+                }
+            }
         }
         let interval = app
             .state::<HubState>()
@@ -405,14 +408,11 @@ fn start_monitor(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Accepts an OAuth browser launch from a Claude Code process started by Hub.
-pub fn run_claude_browser_adapter() -> Option<bool> {
-    claude_login::run_browser_adapter()
-}
-
 pub fn run() {
-    let log_file = std::env::var_os("LOCALAPPDATA").and_then(|appdata| {
-        let dir = std::path::PathBuf::from(appdata).join("AI Usage Hub");
+    // Before any thread starts: a Finder-launched macOS app has no Homebrew/npm folders on PATH.
+    platform::extend_search_path();
+
+    let log_file = platform::log_dir().and_then(|dir| {
         let _ = fs::create_dir_all(&dir);
         fs::OpenOptions::new().create(true).append(true).open(dir.join("app.log")).ok()
     });
@@ -471,6 +471,8 @@ pub fn run() {
                         settings.proxy_api_key = proxy::generate_api_key();
                         let _ = db.save_settings(&settings);
                     }
+                    // "Process monitoring" off in Settings must survive a restart.
+                    state.paused.store(!settings.process_monitoring, Ordering::Relaxed);
                     proxy::set_proxy_options(settings.proxy_timeout_seconds, settings.proxy_background_downgrade);
                     proxy_port = settings.proxy_port;
                     proxy::set_model_map(settings.proxy_model_map);
@@ -528,26 +530,6 @@ pub fn run() {
             google_commands::google_import_metadata,
             google_commands::google_create_backup,
             google_commands::google_restore_backup,
-            cli_switch::switch_account_profile,
-            account_profiles::get_account_profiles,
-            account_profiles::create_account_profile,
-            account_profiles::get_claude_profile_status,
-            claude_login::start_claude_profile_login,
-            claude_login::get_claude_login_url,
-            claude_login::copy_claude_login_url,
-            claude_login::open_claude_login,
-            claude_login::poll_claude_login,
-            claude_login::cancel_claude_login,
-            account_profiles::launch_account_profile,
-            codex_accounts::get_codex_accounts,
-            codex_accounts::start_codex_login,
-            codex_accounts::open_codex_login,
-            codex_accounts::get_codex_login_url,
-            codex_accounts::copy_codex_login_url,
-            codex_accounts::poll_codex_login,
-            codex_accounts::cancel_codex_login,
-            codex_accounts::switch_codex_account,
-            codex_accounts::hide_codex_account,
             commands::get_dashboard,
             commands::refresh_processes,
             commands::get_activity,
@@ -586,6 +568,8 @@ pub fn run() {
             commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
             commands::set_antigravity_account_proxy,
+            commands::reset_antigravity_account_status,
+            commands::get_usage_trends,
             commands::close_antigravity,
             commands::acknowledge_proxy_risk,
             commands::set_provider_key,
@@ -593,6 +577,13 @@ pub fn run() {
             commands::apply_cli_config,
             commands::remove_cli_config,
         ])
-        .run(tauri::generate_context!())
-        .expect("AI Usage Hub failed to start");
+        .build(tauri::generate_context!())
+        .expect("AI Usage Hub failed to start")
+        .run(|_app, _event| {
+            // Clicking the Dock icon while the window is hidden in the menu bar brings it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+                show_main(_app);
+            }
+        });
 }

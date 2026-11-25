@@ -3,6 +3,96 @@
 All public releases are listed here. Version numbers follow the app's package,
 Rust crate, and Tauri bundle versions together.
 
+## [Unreleased]
+
+New:
+
+- **Images through the proxy:** screenshots and pictures in OpenAI
+  (`image_url` with a `data:` URL) and Anthropic (`image` base64) messages are
+  passed to the model. Before, everything except plain text was dropped.
+  Claude Code's tool calls and tool results are passed on as readable text
+  instead of disappearing.
+- **Usage trends:** each card on the Usage page shows a line of its last 24
+  hours.
+- **Reset status:** a rate-limited, expired or forbidden pool account can be
+  put back into rotation with one button. The ten-minute background quota read
+  also clears `forbidden` once the account answers normally again; one 403
+  used to bench an account for good.
+- **Auto-switch notification:** a desktop notification says which account
+  Antigravity was switched to, since the window is usually hidden.
+- **Sign-in protection:** Google sign-in links carry a one-time `state`, and
+  the localhost callback only accepts codes that come back with one. Before,
+  another program or web page could add its own Google account to the pool.
+
+Bug fixes from a full review of the codebase:
+
+- Expired pool accounts were labelled "Healthy" on their card.
+- Failed settings saves, app launches and executable choices were silently
+  ignored; they now show in the error banner.
+- The Activity page now updates live instead of only when it is opened.
+
+- **Google sign-in:** the code Google sends back is now URL-decoded. An
+  escaped code (`4%2F0...`) used to be encoded a second time and refused.
+  The callback also waits for the browser to send its request (on Windows an
+  early read could come back empty and lose the code). Pressing "Cancel" on
+  Google's page now ends the wait at once instead of after two minutes. The
+  manual field accepts the bare code or the whole redirect address.
+- **Re-adding an account** no longer clears its saved refresh token when
+  Google sends no new one, and no longer un-marks the current account. An
+  account whose email cannot be determined is refused instead of being saved
+  as `google_account`.
+- **Import** accepts the `[{"email": ..., "refresh_token": ...}]` list the
+  dialog suggests. Before, only the app's own export format worked. Entries
+  that fail are skipped and the rest are imported.
+- **Auto-switch** waits three minutes between attempts. A switch that kept
+  failing used to rewrite the sign-in and restart Antigravity's language
+  server every few seconds.
+- **API Proxy page:** reading the proxy status no longer counts as using an
+  account. The 5-second poll used to bump `last_used` (rotating round-robin
+  and delaying rate-limit healing) and could refresh tokens on the UI thread.
+- The proxy no longer holds the database lock while it asks Google for tokens
+  or quota, so a slow answer does not freeze the app. It refuses request
+  bodies over 64 MB before allocating them, and keeps every system message
+  instead of only the last.
+- **New proxy key:** Claude Code and OpenCode configs that the hub connected
+  get the new key automatically instead of failing with 401.
+- **Process monitoring off** in Settings now survives a restart.
+- Settings are fully checked before anything is applied, so a refused save
+  no longer changes Windows startup.
+- The tray's "Refresh" runs in the background instead of freezing the tray.
+- `claude auth status` is stopped after 15 seconds, so a hung Claude CLI no
+  longer stalls every later provider refresh.
+- When the saved Antigravity sign-in is renewed a second time, its new expiry
+  and refresh token are now written too.
+- Usage history keeps an unchanged reading only every 15 minutes and drops
+  readings older than 180 days, instead of growing by a row per metric every
+  minute.
+- The dashboard no longer flashes its loading skeleton on every background
+  update. Unsaved edits on the Settings page are no longer reset once a
+  minute.
+## [Unreleased] - macOS port (`macos` branch)
+
+- Bring the `macos` branch up to 0.2.3 and port the Windows-only parts:
+  data, log and Claude/Antigravity paths under `~/Library`; app detection and
+  launching through `.app` bundles; command-line tools found in Homebrew, npm
+  and `~/.local/bin` folders.
+- Encrypt Antigravity pool tokens with ChaCha20-Poly1305 under a key kept in
+  the login Keychain, and switch Antigravity accounts through its Keychain item.
+- Native macOS window buttons, menu-bar hiding with Dock reopen, macOS wording
+  in the interface, and `.app`/`.dmg` bundles built on macOS in CI.
+- macOS versions of the 0.1.24 Windows-only parts: Antigravity close and
+  force-close through `pkill`, Copilot sign-in from `~/.config/github-copilot`,
+  Cursor session from `~/Library/Application Support/Cursor`.
+## [0.2.3] - 2026-11-18
+
+- Remove Codex and Claude Code account switching, profile creation and Hub-managed
+  sign-in flows. Continue reading usage from each application's existing sign-in.
+
+## [0.2.2] - 2026-11-17
+
+- Add a copyable sign-in link while creating a new Codex or Claude Code profile.
+
+
 ## [0.2.1] - 2026-11-17
 
 - Add GitHub release checks in Settings with installed and published versions,

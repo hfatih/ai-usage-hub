@@ -8,7 +8,7 @@ use crate::{
     error::{HubError, Result},
     models::{
         AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings,
-        DashboardSnapshot, SecurityStatus, UsageHistoryPoint,
+        DashboardSnapshot, SecurityStatus, UsageHistoryPoint, UsageTrend,
     },
     refresh_all, update_tray_language, HubState,
 };
@@ -57,6 +57,17 @@ pub fn get_usage_history(state: State<'_, HubState>) -> Result<Vec<UsageHistoryP
         .lock()
         .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
         .usage_history(250)
+}
+
+/// Readings of the last `hours` (default 24, at most a week) for the Usage page's trend lines.
+#[tauri::command]
+pub fn get_usage_trends(state: State<'_, HubState>, hours: Option<i64>) -> Result<Vec<UsageTrend>> {
+    let hours = hours.unwrap_or(24).clamp(1, 24 * 7);
+    state
+        .database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+        .usage_trends(chrono::Utc::now().timestamp() - hours * 3600, 96)
 }
 
 #[tauri::command]
@@ -117,7 +128,15 @@ pub fn update_settings(
     if !matches!(settings.language.as_str(), "tr" | "en") {
         return Err(HubError::Configuration("unsupported language".into()));
     }
+    if settings.proxy_port < 1024 {
+        return Err(HubError::Configuration("proxy port must be between 1024 and 65535".into()));
+    }
+    if !matches!(settings.antigravity_switch_strategy.as_str(), "highest_quota" | "round_robin" | "tier_priority") {
+        return Err(HubError::Configuration("unsupported switch strategy".into()));
+    }
+    settings.antigravity_switch_threshold = settings.antigravity_switch_threshold.clamp(1, 50);
 
+    // Everything is validated above: nothing below runs for settings that are then refused.
     let autostart = app.autolaunch();
     if settings.launch_at_startup {
         autostart
@@ -133,12 +152,6 @@ pub fn update_settings(
         .store(!settings.process_monitoring, Ordering::Relaxed);
     settings.proxy_model_map.retain(|rule| !rule.from.trim().is_empty() && !rule.to.trim().is_empty());
     settings.proxy_timeout_seconds = settings.proxy_timeout_seconds.clamp(10, 600);
-    if settings.proxy_port < 1024 {
-        return Err(HubError::Configuration("proxy port must be between 1024 and 65535".into()));
-    }
-    if !matches!(settings.antigravity_switch_strategy.as_str(), "highest_quota" | "round_robin" | "tier_priority") {
-        return Err(HubError::Configuration("unsupported switch strategy".into()));
-    }
     {
         let db = state
             .database
@@ -172,13 +185,16 @@ pub fn set_app_executable(
     executable_path: String,
 ) -> Result<()> {
     let canonical = std::fs::canonicalize(&executable_path)?;
-    if !canonical.is_file()
-        || !canonical
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
-    {
+    if !crate::platform::is_launchable(&canonical) {
         return Err(HubError::Configuration(
-            "select a valid Windows .exe file".into(),
+            if cfg!(windows) {
+                "select a valid Windows .exe file"
+            } else if cfg!(target_os = "macos") {
+                "select an application (.app) or an executable file"
+            } else {
+                "select an executable file"
+            }
+            .into(),
         ));
     }
     let path = canonical.to_string_lossy();
@@ -207,6 +223,16 @@ pub fn launch(state: &HubState, app_id: &str) -> Result<()> {
 }
 
 fn spawn_hidden(executable: &Path, arguments: &[String]) -> Result<()> {
+    // An app bundle is a folder; Launch Services starts it (or brings it forward if it is open).
+    if cfg!(target_os = "macos") && executable.is_dir() {
+        let mut command = Command::new("/usr/bin/open");
+        command.arg("-a").arg(executable);
+        if !arguments.is_empty() {
+            command.arg("--args").args(arguments);
+        }
+        command.spawn()?;
+        return Ok(());
+    }
     let mut command = Command::new(executable);
     command.args(arguments);
     if let Some(parent) = executable.parent() {
@@ -244,38 +270,12 @@ pub fn add_antigravity_account(
     email: String,
     refresh_token: String,
 ) -> Result<AntigravityAccount> {
-    let token_resp = crate::antigravity::refresh_google_oauth_token(&refresh_token, None)?;
-    let now = chrono::Utc::now().timestamp();
-
-    let (u_email, u_name) = crate::antigravity::fetch_google_account_info(&token_resp.access_token);
-    let final_email = u_email.unwrap_or_else(|| email.trim().to_string());
-    let (quota_pct, quota_details) = match crate::antigravity::fetch_google_quota_summary(&token_resp.access_token, None, None) {
-        Some((q, d)) => (Some(q), Some(d)),
-        None => (None, None),
-    };
-
-    let id = format!("antigravity:{}", final_email.to_lowercase());
-    let account = AntigravityAccount {
-        id: id.clone(),
-        email: final_email,
-        display_name: u_name,
-        access_token: token_resp.access_token,
-        refresh_token: token_resp.refresh_token.unwrap_or(refresh_token),
-        id_token: token_resp.id_token,
-        project_id: None,
-        expiry_timestamp: now + token_resp.expires_in,
-        status: if quota_pct.is_some_and(|q| q <= 0.0) { "rate_limited".into() } else { "healthy".into() },
-        is_current: false,
-        last_used: now,
-        quota_remaining_percent: quota_pct,
-        quota_details,
-        proxy_url: None,
-        tier: None,
-    };
+    let mut account = crate::antigravity::account_from_refresh_token(&email, &refresh_token, None)?;
     let db = state
         .database
         .lock()
         .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
+    db.merge_existing_antigravity_account(&mut account)?;
     db.save_antigravity_account(&account)?;
     Ok(account)
 }
@@ -343,17 +343,13 @@ pub fn start_antigravity_oauth_login(
     state: State<'_, HubState>,
     open_browser: Option<bool>,
 ) -> Result<AntigravityAccount> {
-    let auth_url = crate::antigravity::get_google_oauth_auth_url();
-
     // `false` = the user copied the link to open it in a browser/profile of their choice.
-    #[cfg(windows)]
     if open_browser.unwrap_or(true) {
-        let _ = std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", &auth_url])
-            .spawn();
+        let auth_url = crate::antigravity::get_google_oauth_auth_url();
+        if let Err(error) = crate::platform::open_url(&auth_url) {
+            tracing::warn!(%error, "could not open the browser for Google sign-in");
+        }
     }
-    #[cfg(not(windows))]
-    let _ = open_browser;
 
     let code = crate::antigravity::listen_for_oauth_callback(120)?;
     complete_oauth_code_internal(&state, &code)
@@ -364,7 +360,7 @@ pub fn complete_antigravity_oauth_code(
     state: State<'_, HubState>,
     code: String,
 ) -> Result<AntigravityAccount> {
-    complete_oauth_code_internal(&state, &code)
+    complete_oauth_code_internal(&state, &crate::antigravity::extract_oauth_code(&code)?)
 }
 
 fn complete_oauth_code_internal(
@@ -391,14 +387,16 @@ fn complete_oauth_code_internal(
         }
     }
 
-    let email = email_opt.unwrap_or_else(|| "google_account".into());
+    let email = email_opt.ok_or_else(|| {
+        HubError::Operation("Google did not report which account signed in; please try again".into())
+    })?;
     let (quota_pct, quota_details) = match crate::antigravity::fetch_google_quota_summary(&token_resp.access_token, None, None) {
         Some((q, d)) => (Some(q), Some(d)),
         None => (None, None),
     };
 
-    let id = format!("antigravity:{}", email.to_lowercase());
-    let account = AntigravityAccount {
+    let id = crate::antigravity::account_id(&email);
+    let mut account = AntigravityAccount {
         id: id.clone(),
         email,
         display_name,
@@ -420,6 +418,12 @@ fn complete_oauth_code_internal(
         .database
         .lock()
         .map_err(|_| HubError::Operation("database lock is unavailable".into()))?;
+    db.merge_existing_antigravity_account(&mut account)?;
+    if account.refresh_token.is_empty() {
+        return Err(HubError::Operation(
+            "Google returned no refresh token for this sign-in; remove the app's access at myaccount.google.com/permissions and sign in again".into(),
+        ));
+    }
     db.save_antigravity_account(&account)?;
     Ok(account)
 }
@@ -467,7 +471,7 @@ pub fn sync_antigravity_session(state: State<'_, HubState>) -> Result<Antigravit
     crate::antigravity::sync_antigravity_active_session(&state.database)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_proxy_status(state: State<'_, HubState>) -> crate::proxy::ProxyStatus {
     crate::proxy::get_proxy_status(&state)
 }
@@ -500,6 +504,11 @@ pub fn regenerate_proxy_api_key(state: State<'_, HubState>) -> Result<AppSetting
     let mut settings = db.settings()?;
     settings.proxy_api_key = crate::proxy::generate_api_key();
     db.save_settings(&settings)?;
+    drop(db);
+    // Tools the hub connected itself would otherwise keep sending the old key and get 401s.
+    if let Err(error) = crate::cli_config::rekey(&settings.proxy_api_key) {
+        tracing::warn!(%error, "could not write the new proxy key into connected coding tools");
+    }
     Ok(settings)
 }
 
@@ -532,6 +541,21 @@ pub fn set_antigravity_account_proxy(
         return Err(HubError::Operation("account is no longer in the pool".into()));
     }
     Ok(proxy_url)
+}
+
+/// Puts a benched pool account (rate-limited, expired or forbidden) back into rotation by hand.
+/// The next proxy error or quota read flags it again if the problem is still there.
+#[tauri::command]
+pub fn reset_antigravity_account_status(state: State<'_, HubState>, account_id: String) -> Result<bool> {
+    let found = state
+        .database
+        .lock()
+        .map_err(|_| HubError::Operation("database lock is unavailable".into()))?
+        .set_antigravity_account_status(&account_id, "healthy")?;
+    if !found {
+        return Err(HubError::Operation("account is no longer in the pool".into()));
+    }
+    Ok(true)
 }
 
 /// Closes the Antigravity IDE; `force` ends it without letting it prompt for unsaved work.

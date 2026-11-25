@@ -66,7 +66,11 @@ export function UpdateButton({ settings = false }: { settings?: boolean }) {
     </button>
   );
 
-  if (!settings) return installButton || null;
+  if (!settings) return installButton || (update?.available ? (
+    <button type="button" className="primary-button update-button" onClick={() => void openReleases()} disabled={busy !== null}>
+      <ExternalLink size={14} /> {t("Update to {version}", { version: update.latestVersion })}
+    </button>
+  ) : null);
 
   let status = t("Check for a new stable version on GitHub.");
   if (busy === "check") status = t("Checking GitHub...");

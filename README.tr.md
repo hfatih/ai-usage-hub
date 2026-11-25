@@ -75,14 +75,10 @@ Ekran görüntüleri uygulamanın yerleşik önizleme verisiyle alınmıştır (
 - Kota belirlediğiniz eşiğin altına düştüğünde yerel uyarı, isterseniz Windows bildirimi.
 - Her yapay zekâ uygulamasının bugün ve bu hafta ne kadar açık kaldığını izler.
 
-### Codex hesap değiştirici
+### Codex ve Claude kullanım takibi
 
-**Hesaplar** sayfasında her hesap için bir kez **ChatGPT ile giriş yap** seçilir.
-Hub Codex’in kayıtlı oturumlarını listeler; çalışma alanını seçip elle geçiş
-yapabilirsiniz. Giriş bilgilerini ve yenilemeyi Codex yönetir; Hub Codex tokenı
-saklamaz. Native hesap oturumlarını destekleyen Codex gerekir (0.167.0-alpha.3.2
-ile doğrulandı). Eski hesap görünüyorsa masaüstü uygulamasını yeniden açın veya
-yeni CLI oturumu başlatın. **Hub’dan gizle** yalnız listeyi etkiler; giriş Codex’te kalır.
+Hub, mevcut yerel Codex ve Claude girişlerinden kullanım bilgilerini okur.
+Giriş ve hesap değiştirme işlemlerini sağlayıcının kendi uygulamasından veya CLI’ından yapın.
 
 ### Antigravity hesap havuzu
 
@@ -222,11 +218,43 @@ cd src-tauri
 cargo test --locked
 ```
 
+## macOS (önizleme, `macos` dalı)
+
+Bu dal, aynı uygulamanın yerel bir Mac sürümünü içerir. **Henüz yayımlanmış bir macOS sürümü yoktur.** İş akışı Windows ve macOS'u hedefliyor. Başarılı macOS derlemesi ve testleri hâlâ gereklidir; aşağıdaki entegrasyonlar gerçek uygulamalarla bir Mac'te doğrulanmadı.
+
+| Alan | Windows | macOS |
+| --- | --- | --- |
+| Veritabanı | `%APPDATA%\com.aiusagehub.desktop\` | `~/Library/Application Support/com.aiusagehub.desktop/` |
+| Günlükler | `%LOCALAPPDATA%\AI Usage Hub\` | `~/Library/Logs/AI Usage Hub/` |
+| Havuz tokenlarının şifrelenmesi | DPAPI | ChaCha20-Poly1305; anahtar oturum Anahtar Zinciri'nde (`com.aiusagehub.desktop` / `token-encryption-key`) |
+| Antigravity oturumu (hesap değiştirme) | Kimlik Yöneticisi `gemini:antigravity` | Anahtar Zinciri kaydı, servis `gemini`, hesap `antigravity` |
+| Claude Desktop, Antigravity verisi | `%APPDATA%\Claude`, `%APPDATA%\Antigravity` | `~/Library/Application Support/Claude`, `.../Antigravity` |
+| Uygulama algılama ve açma | `.exe` adları ve kurulum klasörleri | Süreç adları ve `/Applications`, `~/Applications` içindeki `.app` paketleri; Launch Services ile açılır |
+| Komut satırı araçları | `PATH` | `PATH` ile birlikte Homebrew, npm, `~/.local/bin` (Finder'dan açılan uygulamalar bunları devralmaz) |
+| Pencere | Özel başlık çubuğu | Yerel trafik ışıkları; kapatınca menü çubuğuna gizlenir, Dock simgesi geri getirir |
+| Oturum açılışında başlatma | Kayıt defteri | Giriş öğesi (LaunchAgent) |
+
+Bir Mac'te henüz doğrulanmayanlar: Antigravity'nin macOS sürümünün oturumunu `gemini` / `antigravity` Anahtar Zinciri kaydında tutması (biçim, dil sunucusunun kullandığı Go keyring kitaplığıyla aynıdır). Codex ve Claude'un mevcut girişleri yalnızca kullanım verisi okumak için kullanılır; Hub içindeki hesap geçişleri 0.2.3'te kaldırılmıştır. Antigravity'nin yerel portu dil sunucusu günlüğünden, günlük bulunamazsa dil sunucusunun dinlediği portlardan (`lsof`) okunur.
+
+### Mac'te derleme
+
+Gerekenler: macOS 11 veya üstü, Xcode Command Line Tools (`xcode-select --install`), [Node.js](https://nodejs.org/) 20+ ve [Rust](https://rustup.rs/).
+
+```bash
+git clone -b macos https://github.com/Hfatih/ai-usage-hub.git
+cd ai-usage-hub
+npm ci
+npm run tauri dev                         # kaynaktan çalıştırma
+npm run tauri build -- --bundles app,dmg  # çıktı: src-tauri/target/release/bundle/{macos,dmg}/
+```
+
+Her iki platform kontrolü geçtikten sonra push iş akışı GitHub Actions'ta Apple Silicon için bir `.dmg` üretir (`ai-usage-hub-macos-dmg` çıktısı). Derlemeler ad-hoc imzalıdır, notarize edilmemiştir: uygulamayı ilk kez sağ tık → **Aç** ile açın ya da `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"` komutunu çalıştırın. İlk token şifrelemesi `/usr/bin/security` üzerinden bir Anahtar Zinciri kaydı oluşturur; parola sorulması beklenmez.
+
 ## Veri ve güvenlik
 
-- **Verinin yeri:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`, yalnızca bu bilgisayarda.
+- **Verinin yeri:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3` (macOS: `~/Library/Application Support/com.aiusagehub.desktop/`), yalnızca bu bilgisayarda.
 - **Parola yok:** uygulama Google, OpenAI veya Anthropic parolanızı hiçbir zaman istemez ve saklamaz.
-- **Giriş tokenları:** Codex ve Claude kimlik bilgilerini kendileri saklar; uygulama onlar için yalnızca etiket ve kullanım kaydı tutar. Antigravity havuz hesapları için Google OAuth tokenlarını, Windows kullanıcınıza özel olarak Windows DPAPI ile şifreleyip saklar. Kopyalanan veritabanı başka bir Windows kullanıcısında okunamaz.
+- **Giriş tokenları:** Codex ve Claude kimlik bilgilerini kendileri saklar; uygulama onlar için yalnızca etiket ve kullanım kaydı tutar. Antigravity havuz hesapları için Google OAuth tokenlarını, Windows kullanıcınıza özel olarak Windows DPAPI ile (macOS'ta oturum Anahtar Zinciri'ndeki bir anahtarla) şifreleyip saklar. Kopyalanan veritabanı başka bir kullanıcıda okunamaz.
 - **Dışa aktarma:** dışa aktarılan hesap JSON'u tokenları düz metin olarak içerir. Parola gibi saklayın.
 - **API anahtarları ve hesap proxy'leri:** yapıştırdığınız sağlayıcı API anahtarları ve hesap başına proxy adresleri de aynı şekilde DPAPI ile şifreli saklanır; bir anahtar yalnızca kendi sağlayıcısına gönderilir.
 - **Proxy:** yalnızca `127.0.0.1` üzerinde dinler ve siz kapatmadıkça API anahtarı ister.

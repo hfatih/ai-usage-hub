@@ -8,7 +8,8 @@
     &nbsp;•&nbsp;
     <a href="https://github.com/Hfatih/ai-usage-hub/releases/latest">Download Release</a> ·
     <a href="#connecting-tools">Connecting tools</a> ·
-    <a href="#how-it-works">How it works</a>
+    <a href="#how-it-works">How it works</a> ·
+    <a href="#macos-preview-macos-branch">macOS</a>
   </p>
 
   <p>
@@ -75,14 +76,10 @@ Screenshots use the app's built-in preview data.
 - Local alerts when a quota drops below your thresholds, with optional Windows notifications.
 - Tracks how long each AI app has been open today and this week.
 
-### Codex account switcher
+### Codex and Claude usage tracking
 
-On **Accounts**, use **Sign in with ChatGPT** once for each account. Hub reads
-Codex's saved sessions, lets you choose a workspace and verifies a manual switch.
-Credentials and renewal stay with Codex; Hub stores no Codex tokens. Requires a
-Codex version supporting native account sessions (tested with 0.167.0-alpha.3.2).
-Reopen the desktop app or start a new CLI session if it still shows the old account.
-**Hide from Hub** only hides the entry; the sign-in remains saved in Codex.
+Hub reads usage information from your existing local Codex and Claude sign-ins.
+Sign in and change accounts through each provider's own application or CLI.
 
 ### Antigravity account pool
 
@@ -219,11 +216,43 @@ cd src-tauri
 cargo test --locked
 ```
 
+## macOS (preview, `macos` branch)
+
+This branch contains a native Mac port of the same app. **There is no published macOS release yet.** The workflow targets Windows and macOS. A successful macOS build and tests are still required; the integrations below have not been confirmed against the real apps on a Mac.
+
+| Area | Windows | macOS |
+| --- | --- | --- |
+| Database | `%APPDATA%\com.aiusagehub.desktop\` | `~/Library/Application Support/com.aiusagehub.desktop/` |
+| Logs | `%LOCALAPPDATA%\AI Usage Hub\` | `~/Library/Logs/AI Usage Hub/` |
+| Pool token encryption | DPAPI | ChaCha20-Poly1305, key in the login Keychain (`com.aiusagehub.desktop` / `token-encryption-key`) |
+| Antigravity sign-in (switching) | Credential Manager `gemini:antigravity` | Keychain item, service `gemini`, account `antigravity` |
+| Claude Desktop, Antigravity data | `%APPDATA%\Claude`, `%APPDATA%\Antigravity` | `~/Library/Application Support/Claude`, `.../Antigravity` |
+| App detection and launch | `.exe` names and install folders | Process names and `.app` bundles in `/Applications` and `~/Applications`, opened through Launch Services |
+| Command-line tools | `PATH` | `PATH` plus Homebrew, npm, `~/.local/bin`, which Finder-launched apps do not inherit |
+| Window | Custom title bar | Native traffic lights; closing hides to the menu bar, the Dock icon brings it back |
+| Start at login | Registry run key | Login item (LaunchAgent) |
+
+Not yet verified on a Mac: that Antigravity's macOS build keeps its sign-in in the `gemini` / `antigravity` Keychain item (the format matches the Go keyring library its language server uses). Existing Codex and Claude sign-ins remain read-only usage sources; Hub account switching for those tools was removed in 0.2.3. Antigravity's local port is read from its language-server log, or, when that log is not found, from the ports the language server listens on (`lsof`).
+
+### Build on a Mac
+
+Requirements: macOS 11 or later, Xcode Command Line Tools (`xcode-select --install`), [Node.js](https://nodejs.org/) 20+ and [Rust](https://rustup.rs/).
+
+```bash
+git clone -b macos https://github.com/Hfatih/ai-usage-hub.git
+cd ai-usage-hub
+npm ci
+npm run tauri dev                         # run from source
+npm run tauri build -- --bundles app,dmg  # writes src-tauri/target/release/bundle/{macos,dmg}/
+```
+
+After both platform checks pass, the push workflow builds a `.dmg` for Apple Silicon in GitHub Actions (artifact `ai-usage-hub-macos-dmg`). Builds are ad-hoc signed, not notarized: open the app once with right-click → **Open**, or run `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"`. The first token encryption creates a Keychain item through `/usr/bin/security`; no password prompt is expected.
+
 ## Data and security
 
-- **Where data lives:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3`, on this PC only.
+- **Where data lives:** `%APPDATA%\com.aiusagehub.desktop\ai-usage-hub.sqlite3` (macOS: `~/Library/Application Support/com.aiusagehub.desktop/`), on this computer only.
 - **No passwords:** the app never asks for or stores a Google, OpenAI or Anthropic password.
-- **Sign-in tokens:** Codex and Claude keep their own credentials; the hub stores only labels and usage for them. For Antigravity pool accounts it stores Google OAuth tokens, encrypted with Windows DPAPI for your Windows user. A copied database cannot be read under another Windows user.
+- **Sign-in tokens:** Codex and Claude keep their own credentials; the hub stores only labels and usage for them. For Antigravity pool accounts it stores Google OAuth tokens, encrypted with Windows DPAPI for your Windows user (on macOS, with a key kept in your login Keychain). A copied database cannot be read under another user.
 - **Exports:** an exported account JSON contains the tokens in plain text. Treat it like a password.
 - **API keys and account proxies:** provider API keys you paste and per-account proxy addresses are stored the same way, encrypted with DPAPI, and a key is sent only to its own provider.
 - **Proxy:** listens on `127.0.0.1` only and requires the API key unless you turn that off.
