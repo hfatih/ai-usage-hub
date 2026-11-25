@@ -59,6 +59,31 @@ pub fn remove(tool: &str) -> Result<()> {
     remove_at(tool, &config_path(tool)?)
 }
 
+/// Writes a new proxy key into every tool that is already connected to the hub, so regenerating
+/// the key does not silently break them. Tools that are not connected are left alone.
+pub fn rekey(api_key: &str) -> Result<()> {
+    for tool in ["claude", "opencode"] {
+        rekey_at(tool, &config_path(tool)?, api_key)?;
+    }
+    Ok(())
+}
+
+fn rekey_at(tool: &str, path: &Path, api_key: &str) -> Result<()> {
+    let Ok(mut config) = read(path) else {
+        return Ok(()); // not plain JSON: never written by the hub
+    };
+    if !is_applied(tool, &config) {
+        return Ok(());
+    }
+    if tool == "claude" {
+        object_entry(&mut config, "env").insert(CLAUDE_KEYS[1].into(), api_key.into());
+    } else {
+        let provider = object_entry(object_entry(&mut config, "provider"), OPENCODE_PROVIDER);
+        object_entry(provider, "options").insert("apiKey".into(), api_key.into());
+    }
+    write(path, config)
+}
+
 fn read(path: &Path) -> Result<Map<String, Value>> {
     if !path.exists() {
         return Ok(Map::new());
@@ -178,7 +203,12 @@ mod tests {
         let config = read(&path).unwrap();
         assert_eq!(config["provider"][OPENCODE_PROVIDER]["options"]["baseURL"], "http://127.0.0.1:8046/v1");
         assert!(config["provider"][OPENCODE_PROVIDER]["models"].get("gemini-x").is_some());
+        rekey_at("opencode", &path, "sk-hub-new").unwrap();
+        assert_eq!(read(&path).unwrap()["provider"][OPENCODE_PROVIDER]["options"]["apiKey"], "sk-hub-new");
         remove_at("opencode", &path).unwrap();
+        assert!(read(&path).unwrap().get("provider").is_none());
+        // A tool that is not connected is not touched by a new key.
+        rekey_at("opencode", &path, "sk-hub-other").unwrap();
         assert!(read(&path).unwrap().get("provider").is_none());
 
         let commented = folder.path().join("commented.json");

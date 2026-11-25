@@ -99,7 +99,7 @@ pub fn is_launchable(path: &Path) -> bool {
         return path.is_file() && has_extension(path, "exe");
     }
     if cfg!(target_os = "macos") && path.is_dir() && has_extension(path, "app") {
-        return true;
+        return path.join("Contents/Info.plist").is_file();
     }
     is_executable_file(path)
 }
@@ -146,6 +146,17 @@ mod tests {
         let name = executable_name("codex");
         assert_eq!(name.ends_with(".exe"), cfg!(windows));
         assert!(name.starts_with("codex"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn application_bundles_require_their_info_plist() {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("Example.app");
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        assert!(!is_launchable(&app));
+        std::fs::write(app.join("Contents/Info.plist"), b"plist").unwrap();
+        assert!(is_launchable(&app));
     }
 
     #[cfg(unix)]

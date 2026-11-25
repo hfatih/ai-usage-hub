@@ -220,7 +220,7 @@ cargo test --locked
 
 ## macOS (önizleme, `macos` dalı)
 
-Bu dal, aynı uygulamanın yerel bir Mac sürümünü içerir. **Henüz yayımlanmış bir macOS sürümü yoktur.** Mac'e özel kod derleniyor ve birim testleri CI'da macOS üzerinde çalışıyor; ancak aşağıdaki bazı entegrasyonlar gerçek uygulamalarla bir Mac'te henüz doğrulanmadı. Gördüklerinizi lütfen bildirin.
+Bu dal, aynı uygulamanın yerel bir Mac sürümünü içerir. **Henüz yayımlanmış bir macOS sürümü yoktur.** İş akışı Windows ve macOS'u hedefliyor. Başarılı macOS derlemesi ve testleri hâlâ gereklidir; aşağıdaki entegrasyonlar gerçek uygulamalarla bir Mac'te doğrulanmadı.
 
 | Alan | Windows | macOS |
 | --- | --- | --- |
@@ -234,7 +234,7 @@ Bu dal, aynı uygulamanın yerel bir Mac sürümünü içerir. **Henüz yayımla
 | Pencere | Özel başlık çubuğu | Yerel trafik ışıkları; kapatınca menü çubuğuna gizlenir, Dock simgesi geri getirir |
 | Oturum açılışında başlatma | Kayıt defteri | Giriş öğesi (LaunchAgent) |
 
-Bir Mac'te henüz doğrulanmayanlar: Antigravity'nin macOS sürümünün oturumunu `gemini` / `antigravity` Anahtar Zinciri kaydında tutması (biçim, dil sunucusunun kullandığı Go keyring kitaplığıyla aynıdır) ve Codex uygulamasının CLI'ı nerede taşıdığı. Antigravity'nin yerel portu dil sunucusu günlüğünden, günlük bulunamazsa dil sunucusunun dinlediği portlardan (`lsof`) okunur.
+Bir Mac'te henüz doğrulanmayanlar: Antigravity'nin macOS sürümünün oturumunu `gemini` / `antigravity` Anahtar Zinciri kaydında tutması (biçim, dil sunucusunun kullandığı Go keyring kitaplığıyla aynıdır). Codex ve Claude'un mevcut girişleri yalnızca kullanım verisi okumak için kullanılır; Hub içindeki hesap geçişleri 0.2.3'te kaldırılmıştır. Antigravity'nin yerel portu dil sunucusu günlüğünden, günlük bulunamazsa dil sunucusunun dinlediği portlardan (`lsof`) okunur.
 
 ### Mac'te derleme
 
@@ -248,7 +248,7 @@ npm run tauri dev                         # kaynaktan çalıştırma
 npm run tauri build -- --bundles app,dmg  # çıktı: src-tauri/target/release/bundle/{macos,dmg}/
 ```
 
-Bu dala yapılan her push, GitHub Actions'ta Apple Silicon için bir `.dmg` de üretir (`ai-usage-hub-macos-dmg` çıktısı). Derlemeler ad-hoc imzalıdır, notarize edilmemiştir: uygulamayı ilk kez sağ tık → **Aç** ile açın ya da `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"` komutunu çalıştırın. İlk token şifrelemesi `/usr/bin/security` üzerinden bir Anahtar Zinciri kaydı oluşturur; parola sorulması beklenmez.
+Her iki platform kontrolü geçtikten sonra push iş akışı GitHub Actions'ta Apple Silicon için bir `.dmg` üretir (`ai-usage-hub-macos-dmg` çıktısı). Derlemeler ad-hoc imzalıdır, notarize edilmemiştir: uygulamayı ilk kez sağ tık → **Aç** ile açın ya da `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"` komutunu çalıştırın. İlk token şifrelemesi `/usr/bin/security` üzerinden bir Anahtar Zinciri kaydı oluşturur; parola sorulması beklenmez.
 
 ## Veri ve güvenlik
 

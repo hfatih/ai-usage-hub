@@ -218,7 +218,7 @@ cargo test --locked
 
 ## macOS (preview, `macos` branch)
 
-This branch contains a native Mac port of the same app. **There is no published macOS release yet.** The Mac-specific code compiles and its unit tests run on macOS in CI, but some integrations below have not yet been confirmed against the real apps on a Mac; please report what you see.
+This branch contains a native Mac port of the same app. **There is no published macOS release yet.** The workflow targets Windows and macOS. A successful macOS build and tests are still required; the integrations below have not been confirmed against the real apps on a Mac.
 
 | Area | Windows | macOS |
 | --- | --- | --- |
@@ -232,7 +232,7 @@ This branch contains a native Mac port of the same app. **There is no published 
 | Window | Custom title bar | Native traffic lights; closing hides to the menu bar, the Dock icon brings it back |
 | Start at login | Registry run key | Login item (LaunchAgent) |
 
-Not yet verified on a Mac: that Antigravity's macOS build keeps its sign-in in the `gemini` / `antigravity` Keychain item (the format matches the Go keyring library its language server uses), and where the Codex app ships its CLI. Antigravity's local port is read from its language-server log, or, when that log is not found, from the ports the language server listens on (`lsof`).
+Not yet verified on a Mac: that Antigravity's macOS build keeps its sign-in in the `gemini` / `antigravity` Keychain item (the format matches the Go keyring library its language server uses). Existing Codex and Claude sign-ins remain read-only usage sources; Hub account switching for those tools was removed in 0.2.3. Antigravity's local port is read from its language-server log, or, when that log is not found, from the ports the language server listens on (`lsof`).
 
 ### Build on a Mac
 
@@ -246,7 +246,7 @@ npm run tauri dev                         # run from source
 npm run tauri build -- --bundles app,dmg  # writes src-tauri/target/release/bundle/{macos,dmg}/
 ```
 
-Each push to this branch also builds a `.dmg` for Apple Silicon in GitHub Actions (artifact `ai-usage-hub-macos-dmg`). Builds are ad-hoc signed, not notarized: open the app once with right-click → **Open**, or run `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"`. The first token encryption creates a Keychain item through `/usr/bin/security`; no password prompt is expected.
+After both platform checks pass, the push workflow builds a `.dmg` for Apple Silicon in GitHub Actions (artifact `ai-usage-hub-macos-dmg`). Builds are ad-hoc signed, not notarized: open the app once with right-click → **Open**, or run `xattr -dr com.apple.quarantine "/Applications/AI Usage Hub.app"`. The first token encryption creates a Keychain item through `/usr/bin/security`; no password prompt is expected.
 
 ## Data and security
 

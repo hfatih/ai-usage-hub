@@ -217,6 +217,9 @@ pub fn available_models(state: &HubState) -> Vec<ProxyModel> {
 /// Default port for the local AI proxy gateway
 pub const DEFAULT_PROXY_PORT: u16 = 8046;
 
+/// Largest request body the proxy accepts (long conversations with pasted images fit easily).
+const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyRequestLog {
@@ -275,10 +278,11 @@ pub fn start_proxy_server(app_handle: AppHandle, port: u16) {
             }
             Err(e) => {
                 tracing::warn!(port = port, error = %e, "Could not bind AI Proxy to port, trying next port");
-                match TcpListener::bind(format!("127.0.0.1:{}", port + 1)) {
+                let next = port.checked_add(1).unwrap_or(port - 1);
+                match TcpListener::bind(format!("127.0.0.1:{}", next)) {
                     Ok(l) => {
-                        PROXY_PORT.store(port + 1, Ordering::Relaxed);
-                        tracing::info!(port = port + 1, "AI Proxy Gateway started at http://127.0.0.1:{}", port + 1);
+                        PROXY_PORT.store(next, Ordering::Relaxed);
+                        tracing::info!(port = next, "AI Proxy Gateway started at http://127.0.0.1:{}", next);
                         l
                     }
                     Err(e2) => {
@@ -352,6 +356,13 @@ fn handle_proxy_connection(stream: &mut TcpStream, state: &HubState) -> Result<(
                     presented_key = Some(value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")).unwrap_or(value).trim().to_owned());
                 }
             }
+        }
+
+        // The size comes from the client; refuse absurd ones before allocating for them.
+        if content_length > MAX_REQUEST_BODY_BYTES {
+            drop(reader);
+            let err = json!({"error": {"code": 413, "message": format!("Request body is larger than {} MB", MAX_REQUEST_BODY_BYTES / (1024 * 1024))}});
+            return send_json_response(stream, 413, &err);
         }
 
         // Read body if content-length > 0
@@ -694,12 +705,17 @@ fn execute_upstream_request(
         // Handle 401: Token expired mid-flight -> force refresh
         if last_status_code == 401 {
             tracing::warn!(account = %active_account.email, "Access token 401 Unauthorized; refreshing token immediately");
-            if let Ok(db) = state.database.lock() {
-                if let Ok(Some(mut acc)) = db.antigravity_account(&active_account.id) {
-                    if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&acc.refresh_token, acc.proxy_url.as_deref()) {
-                        acc.access_token = token_resp.access_token;
-                        acc.expiry_timestamp = chrono::Utc::now().timestamp() + token_resp.expires_in;
-                        let _ = db.save_antigravity_account(&acc);
+            // Read, ask Google without the lock, then write back only if still pooled.
+            let stored = state.database.lock().ok().and_then(|db| db.antigravity_account(&active_account.id).ok().flatten());
+            if let Some(mut acc) = stored.filter(|acc| !acc.refresh_token.is_empty()) {
+                if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&acc.refresh_token, acc.proxy_url.as_deref()) {
+                    acc.access_token = token_resp.access_token;
+                    acc.expiry_timestamp = chrono::Utc::now().timestamp() + token_resp.expires_in;
+                    if let Some(refresh_token) = token_resp.refresh_token {
+                        acc.refresh_token = refresh_token;
+                    }
+                    if let Ok(db) = state.database.lock() {
+                        let _ = db.update_antigravity_account(&acc);
                     }
                 }
             }
@@ -748,18 +764,74 @@ fn execute_upstream_request(
     Err("All pool accounts exhausted or rate-limited".into())
 }
 
-/// Retrieves an active account from the pool, proactively refreshing expired OAuth tokens
-fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
+/// The pool account the next proxy request would use, read without changing anything.
+fn peek_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
     let db = state.database.lock().map_err(|_| "Database lock error".to_string())?;
     let accounts = db.eligible_antigravity_accounts().map_err(|e| e.to_string())?;
 
     if accounts.is_empty() {
         return Err("No enabled Antigravity accounts are available. Enable an account in the Google control center.".into());
     }
+    let strategy = db.settings().unwrap_or_default().antigravity_switch_strategy;
+    choose_account(&accounts, &strategy).ok_or_else(|| "No suitable account available".to_string())
+}
 
-    let settings = db.settings().unwrap_or_default();
-    let strategy = settings.antigravity_switch_strategy.as_str();
+/// Retrieves an active account from the pool, proactively refreshing expired OAuth tokens.
+/// The database lock is only held to pick the account and to write it back, never while Google
+/// is being asked, so a slow token or quota call does not freeze the rest of the app.
+fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
+    let mut chosen = peek_active_account(state)?;
 
+    // Check token expiry - if expiring within 60s, refresh immediately!
+    let now = chrono::Utc::now().timestamp();
+    if chosen.expiry_timestamp <= now + 60 && !chosen.refresh_token.is_empty() {
+        tracing::info!(account = %chosen.email, "Refreshing expired Google OAuth access token for proxy request");
+        if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&chosen.refresh_token, chosen.proxy_url.as_deref()) {
+            chosen.access_token = token_resp.access_token;
+            chosen.expiry_timestamp = now + token_resp.expires_in;
+            if let Some(refresh_token) = token_resp.refresh_token {
+                chosen.refresh_token = refresh_token;
+            }
+            if let Some(id_tok) = token_resp.id_token {
+                chosen.id_token = Some(id_tok);
+            }
+            tracing::info!(account = %chosen.email, "Access token refreshed successfully");
+        }
+    }
+
+    // Auto-heal rate_limited account if quota is restored
+    if chosen.status == "rate_limited" {
+        if let Some((quota, details)) = antigravity::fetch_google_quota_summary(&chosen.access_token, chosen.project_id.as_deref(), chosen.proxy_url.as_deref()) {
+            if quota > 0.0 {
+                chosen.status = "healthy".into();
+                chosen.quota_remaining_percent = Some(quota);
+                chosen.quota_details = Some(details);
+                tracing::info!(account = %chosen.email, quota = quota, "Account auto-healed and restored to healthy status");
+            }
+        }
+    }
+
+    chosen.last_used = now;
+    let still_pooled = state
+        .database
+        .lock()
+        .map_err(|_| "Database lock error".to_string())?
+        .update_antigravity_account(&chosen)
+        .map_err(|e| e.to_string())?;
+    if !still_pooled {
+        return Err(format!("{} was removed from the pool", chosen.email));
+    }
+
+    if let Ok(mut lock) = ACTIVE_ACCOUNT_EMAIL.lock() {
+        *lock = Some(chosen.email.clone());
+    }
+
+    Ok(chosen)
+}
+
+/// Picks the account for the next request by the user's strategy among the accounts that are not
+/// rate-limited, expired or forbidden; when none is left, the one with the most quota.
+fn choose_account(accounts: &[AntigravityAccount], strategy: &str) -> Option<AntigravityAccount> {
     // Try current healthy account, then highest healthy quota account (skip rate_limited, expired, and forbidden)
     let healthy: Vec<&AntigravityAccount> = accounts
         .iter()
@@ -807,7 +879,7 @@ fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
         }
     } else {
         // Fallback: pick the account with highest quota or oldest last_used
-        let mut fallback = accounts.clone();
+        let mut fallback = accounts.to_vec();
         fallback.sort_by(|a, b| {
             let qa = a.quota_remaining_percent.unwrap_or(0.0);
             let qb = b.quota_remaining_percent.unwrap_or(0.0);
@@ -815,46 +887,7 @@ fn get_active_account(state: &HubState) -> Result<AntigravityAccount, String> {
         });
         fallback.first().cloned()
     };
-
-    let mut chosen = chosen_opt.ok_or("No suitable account available")?;
-
-    // Check token expiry - if expiring within 60s, refresh immediately!
-    let now = chrono::Utc::now().timestamp();
-    if chosen.expiry_timestamp <= now + 60 && !chosen.refresh_token.is_empty() {
-        tracing::info!(account = %chosen.email, "Refreshing expired Google OAuth access token for proxy request");
-        if let Ok(token_resp) = antigravity::refresh_google_oauth_token(&chosen.refresh_token, chosen.proxy_url.as_deref()) {
-            chosen.access_token = token_resp.access_token;
-            chosen.expiry_timestamp = now + token_resp.expires_in;
-            if let Some(id_tok) = token_resp.id_token {
-                chosen.id_token = Some(id_tok);
-            }
-            let _ = db.save_antigravity_account(&chosen);
-            tracing::info!(account = %chosen.email, "Access token refreshed successfully");
-        }
-    }
-
-    // Auto-heal rate_limited account if quota is restored
-    if chosen.status == "rate_limited" {
-        if let Some((quota, details)) = antigravity::fetch_google_quota_summary(&chosen.access_token, chosen.project_id.as_deref(), chosen.proxy_url.as_deref()) {
-            if quota > 0.0 {
-                chosen.status = "healthy".into();
-                chosen.quota_remaining_percent = Some(quota);
-                chosen.quota_details = Some(details);
-                let _ = db.save_antigravity_account(&chosen);
-                tracing::info!(account = %chosen.email, quota = quota, "Account auto-healed and restored to healthy status");
-            }
-        }
-    }
-
-    // Update last_used
-    chosen.last_used = now;
-    let _ = db.save_antigravity_account(&chosen);
-
-    if let Ok(mut lock) = ACTIVE_ACCOUNT_EMAIL.lock() {
-        *lock = Some(chosen.email.clone());
-    }
-
-    Ok(chosen)
+    chosen_opt
 }
 
 fn mark_account_status(state: &HubState, account_id: &str, status: &str) {
@@ -864,6 +897,82 @@ fn mark_account_status(state: &HubState, account_id: &str, status: &str) {
             let _ = db.save_antigravity_account(&acc);
         }
     }
+}
+
+/// The plain text of an OpenAI/Anthropic message `content` (a string or a list of blocks).
+fn content_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks.iter().filter_map(|block| block.get("text").and_then(Value::as_str)).collect(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// `(mime type, base64 data)` of a `data:` URL.
+fn data_url(url: &str) -> Option<(String, String)> {
+    let (header, data) = url.strip_prefix("data:")?.split_once(',')?;
+    let mime = header.strip_suffix(";base64")?;
+    Some((if mime.is_empty() { "image/png".to_owned() } else { mime.to_owned() }, data.to_owned()))
+}
+
+/// Gemini `parts` for an OpenAI or Anthropic message `content`. Besides text this keeps:
+/// images (OpenAI `image_url` with a `data:` URL, Anthropic `image` with a base64 source) as
+/// `inlineData`, so screenshots pasted into Claude Code or a chat client reach the model; and
+/// Anthropic `tool_use` / `tool_result` blocks as readable text, so the model still sees what a
+/// tool was asked and what it answered. An image only reachable by web address is named in text.
+fn content_parts(content: &Value) -> Vec<Value> {
+    let Value::Array(blocks) = content else {
+        return vec![json!({ "text": content_text(content) })];
+    };
+    let mut parts = Vec::new();
+    for block in blocks {
+        let kind = block.get("type").and_then(Value::as_str).unwrap_or_default();
+        match kind {
+            "image_url" => {
+                let url = block.pointer("/image_url/url").or_else(|| block.get("image_url")).and_then(Value::as_str).unwrap_or_default();
+                match data_url(url) {
+                    Some((mime, data)) => parts.push(json!({ "inlineData": { "mimeType": mime, "data": data } })),
+                    None if !url.is_empty() => parts.push(json!({ "text": format!("[image: {url}]") })),
+                    None => {}
+                }
+            }
+            "image" => match block.get("source") {
+                Some(source) if source.get("type").and_then(Value::as_str) == Some("base64") => {
+                    let mime = source.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+                    if let Some(data) = source.get("data").and_then(Value::as_str) {
+                        parts.push(json!({ "inlineData": { "mimeType": mime, "data": data } }));
+                    }
+                }
+                Some(source) => {
+                    if let Some(url) = source.get("url").and_then(Value::as_str) {
+                        parts.push(json!({ "text": format!("[image: {url}]") }));
+                    }
+                }
+                None => {}
+            },
+            "tool_use" => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                let input = block.get("input").map(Value::to_string).unwrap_or_default();
+                parts.push(json!({ "text": format!("[called {name} with {input}]") }));
+            }
+            "tool_result" => {
+                let result = block.get("content").map(content_parts).unwrap_or_default();
+                let failed = block.get("is_error").and_then(Value::as_bool) == Some(true);
+                parts.push(json!({ "text": if failed { "[tool error]" } else { "[tool result]" } }));
+                parts.extend(result);
+            }
+            _ => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    parts.push(json!({ "text": text }));
+                }
+            }
+        }
+    }
+    if parts.is_empty() {
+        parts.push(json!({ "text": "" }));
+    }
+    parts
 }
 
 /// Helper to extract clean response text and token metrics from CloudCode response
@@ -934,33 +1043,22 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
 
     // Convert OpenAI messages to Gemini contents
     let mut contents = Vec::new();
-    let mut system_instruction = None;
+    let mut system_text: Option<String> = None;
 
     if let Some(messages) = req.messages {
         for msg in messages {
-            let text = match msg.content {
-                Value::String(s) => s,
-                Value::Array(arr) => {
-                    let mut combined = String::new();
-                    for item in arr {
-                        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                            combined.push_str(t);
-                        }
-                    }
-                    combined
-                }
-                _ => msg.content.to_string(),
-            };
-
             if msg.role == "system" || msg.role == "developer" {
-                system_instruction = Some(json!({
-                    "parts": [{ "text": text }]
-                }));
+                let text = content_text(&msg.content);
+                // Several system messages are common (tool instructions plus a persona); keep all.
+                system_text = match system_text.take() {
+                    Some(previous) => Some(format!("{previous}\n\n{text}")),
+                    None => Some(text),
+                };
             } else {
                 let role = if msg.role == "assistant" { "model" } else { "user" };
                 contents.push(json!({
                     "role": role,
-                    "parts": [{ "text": text }]
+                    "parts": content_parts(&msg.content)
                 }));
             }
         }
@@ -973,6 +1071,7 @@ fn handle_chat_completions(stream: &mut TcpStream, state: &HubState, body: &str)
         }));
     }
 
+    let system_instruction = system_text.map(|text| json!({ "parts": [{ "text": text }] }));
     let max_output_tokens = req.max_completion_tokens.or(req.max_tokens).unwrap_or(4096);
     let mut gen_config = json!({
         "temperature": req.temperature.unwrap_or(0.7),
@@ -1130,19 +1229,7 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
     let mut system_instruction = None;
 
     if let Some(sys) = req.system {
-        let text = match sys {
-            Value::String(s) => s,
-            Value::Array(arr) => {
-                let mut combined = String::new();
-                for item in arr {
-                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                        combined.push_str(t);
-                    }
-                }
-                combined
-            }
-            _ => sys.to_string(),
-        };
+        let text = content_text(&sys);
         system_instruction = Some(json!({
             "parts": [{ "text": text }]
         }));
@@ -1150,23 +1237,10 @@ fn handle_anthropic_messages(stream: &mut TcpStream, state: &HubState, body: &st
 
     if let Some(messages) = req.messages {
         for msg in messages {
-            let text = match msg.content {
-                Value::String(s) => s,
-                Value::Array(arr) => {
-                    let mut combined = String::new();
-                    for item in arr {
-                        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                            combined.push_str(t);
-                        }
-                    }
-                    combined
-                }
-                _ => msg.content.to_string(),
-            };
             let role = if msg.role == "assistant" { "model" } else { "user" };
             contents.push(json!({
                 "role": role,
-                "parts": [{ "text": text }]
+                "parts": content_parts(&msg.content)
             }));
         }
     }
@@ -1493,7 +1567,9 @@ fn handle_gemini_native(
 
 /// Returns live status and statistics for the local AI proxy gateway
 pub fn get_proxy_status(state: &HubState) -> ProxyStatus {
-    let active_email = get_active_account(state).ok().map(|a| a.email);
+    // Only a look: the status page polls this, and picking for real would refresh tokens and
+    // bump `last_used`, which rotates round-robin and delays rate-limit healing on every poll.
+    let active_email = peek_active_account(state).ok().map(|a| a.email);
     let logs = RECENT_LOGS
         .lock()
         .map(|l| l.iter().cloned().collect())
@@ -1619,6 +1695,34 @@ mod tests {
         assert!(chat_upstream_model("claude-sonnet-4", &title).contains("flash"));
         let work = json!({ "contents": [{ "role": "user", "parts": [{ "text": "Refactor this function" }] }] });
         assert!(!chat_upstream_model("claude-sonnet-4", &work).contains("flash"));
+    }
+
+    #[test]
+    fn images_and_tool_blocks_reach_the_model() {
+        let openai = json!([
+            { "type": "text", "text": "What is in this?" },
+            { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } },
+            { "type": "image_url", "image_url": { "url": "https://example.com/cat.png" } }
+        ]);
+        assert_eq!(content_parts(&openai), vec![
+            json!({ "text": "What is in this?" }),
+            json!({ "inlineData": { "mimeType": "image/jpeg", "data": "QUJD" } }),
+            json!({ "text": "[image: https://example.com/cat.png]" }),
+        ]);
+
+        let anthropic = json!([
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "WFla" } },
+            { "type": "tool_result", "tool_use_id": "t1", "content": [{ "type": "text", "text": "42 files" }] },
+            { "type": "tool_use", "id": "t2", "name": "Read", "input": { "path": "a.rs" } }
+        ]);
+        let parts = content_parts(&anthropic);
+        assert_eq!(parts[0], json!({ "inlineData": { "mimeType": "image/png", "data": "WFla" } }));
+        assert_eq!(&parts[1..3], &[json!({ "text": "[tool result]" }), json!({ "text": "42 files" })]);
+        assert_eq!(parts[3], json!({ "text": "[called Read with {\"path\":\"a.rs\"}]" }));
+
+        assert_eq!(content_parts(&json!("hi")), vec![json!({ "text": "hi" })]);
+        assert_eq!(content_parts(&json!([])), vec![json!({ "text": "" })]);
+        assert_eq!(content_text(&json!([{ "type": "text", "text": "a" }, { "type": "text", "text": "b" }])), "ab");
     }
 
     #[test]

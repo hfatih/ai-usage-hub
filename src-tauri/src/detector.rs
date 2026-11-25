@@ -103,6 +103,11 @@ pub fn process_matches(
         return !is_claude_code;
     }
 
+    // Gemini Desktop has the same process name as the CLI, but its bundle is a different app.
+    if app.id == "gemini" && executable.contains(".app/contents/macos/") {
+        return false;
+    }
+
     if app.process_names.iter().any(|candidate| {
         let candidate = candidate.to_ascii_lowercase();
         candidate.strip_suffix(".exe").unwrap_or(&candidate) == stem
@@ -155,6 +160,7 @@ fn mac_bundles(app_id: &str) -> &'static [&'static str] {
         "cursor" => &["Cursor.app"],
         "vscode" => &["Visual Studio Code.app"],
         "kimi" => &["Kimi.app"],
+        "opencode" => &["OpenCode.app"],
         _ => &[],
     }
 }
@@ -165,10 +171,21 @@ fn known_candidates(app_id: &str) -> Vec<PathBuf> {
     if let Some(home) = crate::platform::home_dir() {
         roots.push(home.join("Applications"));
     }
-    roots
+    let mut paths: Vec<_> = roots
         .iter()
         .flat_map(|root| mac_bundles(app_id).iter().map(move |bundle| root.join(bundle)))
-        .collect()
+        .collect();
+    let command = match app_id {
+        "claude-code" => Some("claude"),
+        "gemini" => Some("gemini"),
+        "codex" => Some("codex"),
+        "opencode" => Some("opencode"),
+        _ => None,
+    };
+    if let Some(command) = command {
+        paths.extend(crate::platform::extra_bin_dirs().iter().map(|root| root.join(command)));
+    }
+    paths
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -266,6 +283,15 @@ mod tests {
             Some(code_path),
             ""
         ));
+    }
+
+    #[test]
+    fn gemini_cli_does_not_match_the_desktop_app() {
+        let cli = definition("gemini", &["gemini.exe"]);
+        let app = Path::new("/Applications/Gemini.app/Contents/MacOS/Gemini");
+        let executable = Path::new("/opt/homebrew/bin/gemini");
+        assert!(!process_matches(&cli, "Gemini", Some(app), ""));
+        assert!(process_matches(&cli, "gemini", Some(executable), ""));
     }
 
     #[test]

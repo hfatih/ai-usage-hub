@@ -259,10 +259,14 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 let _ = app.emit("hub://navigate", "settings");
             }
             "refresh" => {
-                let state = app.state::<HubState>();
-                if refresh_all(&state, true).is_ok() {
-                    let _ = app.emit("hub://status-changed", ());
-                }
+                // A forced refresh calls the providers over the network; doing it here would
+                // freeze the tray and the window until every provider has answered.
+                let app = app.clone();
+                thread::spawn(move || {
+                    if refresh_all(&app.state::<HubState>(), true).is_ok() {
+                        let _ = app.emit("hub://status-changed", ());
+                    }
+                });
             }
             "pause" => {
                 let state = app.state::<HubState>();
@@ -278,7 +282,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             id if id.starts_with("launch:") => {
                 let state = app.state::<HubState>();
-                if let Err(error) = commands::launch(&state, &id[7..]) {
+                if let Err(error) = commands::launch(&state, &id["launch:".len()..]) {
                     tracing::warn!(%error, "tray launch failed");
                 }
             }
@@ -380,6 +384,14 @@ fn start_monitor(app: tauri::AppHandle) {
             tracing::info!(account = %switched.email, "Antigravity auto-switched account");
             let _ = app.emit("hub://status-changed", ());
             let _ = app.emit("hub://antigravity-switched", &switched);
+            // The window is usually hidden in the tray when this happens; say so on the desktop.
+            let settings = app.state::<HubState>().database.lock().ok().and_then(|db| db.settings().ok());
+            if let Some(settings) = settings.filter(|settings| settings.desktop_notifications && settings.notifications_enabled) {
+                let (title, body) = i18n::auto_switch_text(&switched.email, &settings.language);
+                if let Err(error) = app.notification().builder().title(title).body(body).show() {
+                    tracing::warn!(%error, "could not show auto-switch notification");
+                }
+            }
         }
         let interval = app
             .state::<HubState>()
@@ -459,6 +471,8 @@ pub fn run() {
                         settings.proxy_api_key = proxy::generate_api_key();
                         let _ = db.save_settings(&settings);
                     }
+                    // "Process monitoring" off in Settings must survive a restart.
+                    state.paused.store(!settings.process_monitoring, Ordering::Relaxed);
                     proxy::set_proxy_options(settings.proxy_timeout_seconds, settings.proxy_background_downgrade);
                     proxy_port = settings.proxy_port;
                     proxy::set_model_map(settings.proxy_model_map);
@@ -554,6 +568,8 @@ pub fn run() {
             commands::regenerate_proxy_api_key,
             commands::clear_proxy_logs,
             commands::set_antigravity_account_proxy,
+            commands::reset_antigravity_account_status,
+            commands::get_usage_trends,
             commands::close_antigravity,
             commands::acknowledge_proxy_risk,
             commands::set_provider_key,

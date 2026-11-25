@@ -8,9 +8,14 @@ use crate::{
     models::{
         AccountSummary, ActivityEvent, AntigravityAccount, AppSettings, AppStatus, ApplicationDefinition, Confidence,
         ConnectionStatus, ProviderSummary, RunningState, SecurityStatus, Severity,
-        UsageHistoryPoint, UsageSource, UsageValue,
+        UsageHistoryPoint, UsageSource, UsageTrend, UsageValue,
     },
 };
+
+/// Seconds within which an unchanged usage reading is not stored again.
+const UNCHANGED_SNAPSHOT_INTERVAL: i64 = 15 * 60;
+/// Usage readings older than this are removed when the app starts.
+const SNAPSHOT_RETENTION_DAYS: i64 = 180;
 
 /// Matches pool accounts that still hold a sign-in token in plain text.
 /// Rows holding a token in neither protected form (`dpapi:` on Windows, `keychain:` on macOS;
@@ -188,6 +193,10 @@ impl Database {
         self.connection.execute(
             "DELETE FROM usage_snapshots WHERE metric = 'antigravity_image_generation' OR metric LIKE 'google\\_credit\\_%' ESCAPE '\\'",
             [],
+        )?;
+        self.connection.execute(
+            "DELETE FROM usage_snapshots WHERE retrieved_at < ?1",
+            [Utc::now().timestamp() - SNAPSHOT_RETENTION_DAYS * 86_400],
         )?;
         Ok(())
     }
@@ -427,13 +436,25 @@ impl Database {
             .iter()
             .filter(|usage| usage.value.is_some() && usage.source != UsageSource::LocalLogs)
         {
-            let previous: Option<f64> = tx
+            let latest: Option<(f64, Option<f64>, Option<i64>, i64)> = tx
                 .query_row(
-                    "SELECT value FROM usage_snapshots WHERE account_id = ?1 AND metric = ?2 AND value IS NOT NULL ORDER BY retrieved_at DESC, id DESC LIMIT 1",
+                    "SELECT value, max_value, reset_at, retrieved_at FROM usage_snapshots WHERE account_id = ?1 AND metric = ?2 AND value IS NOT NULL ORDER BY retrieved_at DESC, id DESC LIMIT 1",
                     params![account_id, usage.metric],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .optional()?;
+            let previous = latest.map(|(value, ..)| value);
+            // The background refresh runs every minute; repeating an unchanged reading that often
+            // only grows the database (tens of thousands of rows a day). A reading that changed,
+            // or one 15 minutes after the last stored row, is kept.
+            if latest.is_some_and(|(value, max_value, reset_at, retrieved_at)| {
+                Some(value) == usage.value
+                    && max_value == usage.max_value
+                    && reset_at == usage.reset_at
+                    && (0..UNCHANGED_SNAPSHOT_INTERVAL).contains(&(usage.retrieved_at - retrieved_at))
+            }) {
+                continue;
+            }
             tx.execute(
                 "INSERT INTO usage_snapshots (account_id, metric, value, max_value, unit, source, confidence, window_type, reset_at, retrieved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
@@ -534,6 +555,34 @@ impl Database {
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Readings since `since` for every account and metric, oldest first, thinned to at most
+    /// `max_points` per series (evenly spaced, always keeping the newest).
+    pub fn usage_trends(&self, since: i64, max_points: usize) -> Result<Vec<UsageTrend>> {
+        let mut statement = self.connection.prepare(
+            "SELECT account_id, metric, retrieved_at, value FROM usage_snapshots WHERE retrieved_at >= ?1 AND value IS NOT NULL ORDER BY account_id, metric, retrieved_at, id",
+        )?;
+        let rows = statement.query_map([since], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, f64>(3)?))
+        })?;
+        let mut trends: Vec<UsageTrend> = Vec::new();
+        for row in rows {
+            let (account_id, metric, at, value) = row?;
+            match trends.last_mut() {
+                Some(trend) if trend.account_id == account_id && trend.metric == metric => trend.points.push((at, value)),
+                _ => trends.push(UsageTrend { account_id, metric, points: vec![(at, value)] }),
+            }
+        }
+        let max_points = max_points.max(2);
+        for trend in &mut trends {
+            let count = trend.points.len();
+            if count > max_points {
+                let step = (count - 1) as f64 / (max_points - 1) as f64;
+                trend.points = (0..max_points).map(|index| trend.points[((index as f64 * step).round() as usize).min(count - 1)]).collect();
+            }
+        }
+        Ok(trends)
     }
 
     pub fn notifications(&self, limit: usize) -> Result<Vec<ActivityEvent>> {
@@ -766,6 +815,20 @@ impl Database {
         Ok(())
     }
 
+    /// Prepares a freshly built account (sign-in, manual add, import) for saving over one that may
+    /// already be in the pool: it stays the current account if it was, and keeps its stored
+    /// refresh token when the new sign-in did not come with one, so re-adding an account never
+    /// signs it out of the pool.
+    pub fn merge_existing_antigravity_account(&self, account: &mut AntigravityAccount) -> Result<()> {
+        if let Some(existing) = self.antigravity_account(&account.id)? {
+            account.is_current = existing.is_current;
+            if account.refresh_token.is_empty() {
+                account.refresh_token = existing.refresh_token;
+            }
+        }
+        Ok(())
+    }
+
     /// Saves changes to an account only if it is still in the pool, and reports whether it was.
     /// Callers that read an account, spend time on the network and then write it back use this
     /// so an account deleted in the meantime is not re-created together with its tokens.
@@ -786,6 +849,12 @@ impl Database {
             params![id, proxy_url.map(crate::secret::protect)],
         )?;
         Ok(changed > 0)
+    }
+
+    /// Sets a pool account's routing status (`healthy`, `rate_limited`, `expired`, `forbidden`).
+    /// Returns whether the account exists.
+    pub fn set_antigravity_account_status(&self, id: &str, status: &str) -> Result<bool> {
+        Ok(self.connection.execute("UPDATE antigravity_accounts SET status = ?2 WHERE id = ?1", params![id, status])? > 0)
     }
 
     /// API keys the user entered for key-based providers, by provider id, decrypted.
@@ -1267,6 +1336,16 @@ mod tests {
         db.save_provider_snapshot(&provider("account-a", "a@example.com", 70.0, 100))?;
         db.save_provider_snapshot(&provider("account-b", "b@example.com", 30.0, 200))?;
         db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300))?;
+        // The same reading a minute later is not stored again; a change is.
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 360))?;
+        let rows_a = |db: &Database| -> Result<i64> {
+            Ok(db.connection.query_row("SELECT COUNT(*) FROM usage_snapshots WHERE account_id = 'openai:account-a'", [], |row| row.get(0))?)
+        };
+        assert_eq!(rows_a(&db)?, 2);
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300 + UNCHANGED_SNAPSHOT_INTERVAL))?;
+        assert_eq!(rows_a(&db)?, 3);
+        db.save_provider_snapshot(&provider("account-a", "a@example.com", 60.0, 300 + UNCHANGED_SNAPSHOT_INTERVAL + 60))?;
+        assert_eq!(rows_a(&db)?, 3);
 
         let account_count: i64 =
             db.connection
@@ -1306,6 +1385,13 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(active_count, 0);
+        let trends = db.usage_trends(0, 2)?;
+        let trend_a = trends.iter().find(|trend| trend.account_id == "openai:account-a").unwrap();
+        assert_eq!(trend_a.points.first(), Some(&(100, 70.0)));
+        assert_eq!(trend_a.points.len(), 2, "thinned to the requested number of points");
+        assert_eq!(trend_a.points.last().map(|point| point.0), Some(300 + UNCHANGED_SNAPSHOT_INTERVAL));
+        assert!(db.usage_trends(1_000_000, 50)?.is_empty());
+
         assert!(db.delete_account("openai:account-b")?);
         assert_eq!(db.accounts()?.len(), 1);
         Ok(())

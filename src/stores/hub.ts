@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { api } from "../lib/ipc";
-import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, SecurityStatus, UsageHistoryPoint } from "../types";
+import type { AccountSummary, ActivityEvent, AntigravityAccount, AntigravityLiveSession, AppSettings, DashboardSnapshot, SecurityStatus, UsageHistoryPoint, UsageTrend } from "../types";
 
 interface HubState {
   snapshot: DashboardSnapshot | null;
@@ -10,6 +10,7 @@ interface HubState {
   antigravityAccounts: AntigravityAccount[];
   liveSession: AntigravityLiveSession | null;
   usageHistory: UsageHistoryPoint[];
+  usageTrends: UsageTrend[];
   notifications: ActivityEvent[];
   security: SecurityStatus | null;
   loading: boolean;
@@ -34,6 +35,8 @@ interface HubState {
   saveSettings: (settings: AppSettings) => Promise<void>;
   deleteAccount: (accountId: string) => Promise<void>;
   clearUsageHistory: () => Promise<void>;
+  launchApp: (appId: string) => Promise<void>;
+  setExecutable: (appId: string, path: string) => Promise<void>;
 }
 
 export const useHub = create<HubState>((set, get) => ({
@@ -44,18 +47,29 @@ export const useHub = create<HubState>((set, get) => ({
   antigravityAccounts: [],
   liveSession: null,
   usageHistory: [],
+  usageTrends: [],
   notifications: [],
   security: null,
   loading: true,
   refreshing: false,
   error: null,
   load: async () => {
-    set({ loading: true, error: null });
+    // The backend asks for a reload every time something changes (at least once a minute). Only
+    // the very first load shows the skeleton; later ones swap the data in place.
+    set({ loading: get().snapshot === null, error: null });
     try {
-      const [snapshot, settings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security] = await Promise.all([
+      const [snapshot, fetchedSettings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security] = await Promise.all([
         api.dashboard(), api.settings(), api.accounts(), api.antigravityAccounts(), api.getAntigravityLiveSession(), api.usageHistory(), api.notifications(), api.security(),
       ]);
+      // Keep the same object when nothing changed, so pages that edit a draft of the settings
+      // (Settings, API Proxy) do not lose unsaved edits on every background reload.
+      const current = get().settings;
+      const settings = current && JSON.stringify(current) === JSON.stringify(fetchedSettings) ? current : fetchedSettings;
       set({ snapshot, settings, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security, loading: false });
+      // Secondary data: a failure here must not blank the dashboard.
+      void Promise.all([api.activity(), api.usageTrends()])
+        .then(([activity, usageTrends]) => set({ activity, usageTrends }))
+        .catch(() => {});
     } catch (error) {
       set({ error: String(error), loading: false });
     }
@@ -68,6 +82,9 @@ export const useHub = create<HubState>((set, get) => ({
         api.accounts(), api.antigravityAccounts(), api.getAntigravityLiveSession(), api.usageHistory(), api.notifications(), api.security(),
       ]);
       set({ snapshot, accounts, antigravityAccounts, liveSession, usageHistory, notifications, security, refreshing: false });
+      void Promise.all([api.activity(), api.usageTrends()])
+        .then(([activity, usageTrends]) => set({ activity, usageTrends }))
+        .catch(() => {});
     } catch (error) {
       set({ error: String(error), refreshing: false });
     }
@@ -151,7 +168,31 @@ export const useHub = create<HubState>((set, get) => ({
     get().refresh().catch(() => {});
     return liveSession;
   },
-  saveSettings: async (settings) => set({ settings: await api.saveSettings(settings) }),
+  // Failures show in the error banner (callers often fire and forget) and are still thrown for
+  // callers that show them next to the field.
+  saveSettings: async (settings) => {
+    try {
+      set({ settings: await api.saveSettings(settings), error: null });
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+  launchApp: async (appId) => {
+    try {
+      await api.launchApp(appId);
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+  setExecutable: async (appId, path) => {
+    try {
+      await api.setExecutable(appId, path);
+      await get().refresh();
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
   deleteAccount: async (accountId) => {
     await api.deleteAccount(accountId);
     const [accounts, usageHistory, security] = await Promise.all([api.accounts(), api.usageHistory(), api.security()]);

@@ -272,37 +272,37 @@ fn summary_from_vault() -> Result<ProviderSummary> {
         .map(|dt| dt.timestamp())
         .unwrap_or(0);
 
-    if now >= expiry_ts - 60 && !details.refresh_token.is_empty() {
-        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token, None) {
-            access_token = token_resp.access_token.clone();
-            details.access_token = token_resp.access_token;
-            if let Some(ref rt) = token_resp.refresh_token {
-                details.refresh_token = rt.clone();
-            }
-            if let Some(ref it) = token_resp.id_token {
-                details.id_token = Some(it.clone());
-            }
-            details.expiry = DateTime::from_timestamp(now + token_resp.expires_in, 0)
-                .unwrap_or_else(Utc::now)
-                .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-            let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
-                token: details.clone(),
-                ..cred.clone()
-            });
+    // Renews the access token and writes the complete result (token, rotated refresh token,
+    // id token and the new expiry) back where Antigravity reads it.
+    let renew = |details: &mut crate::antigravity::KeyringTokenDetails| -> bool {
+        let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token, None) else {
+            return false;
+        };
+        details.access_token = token_resp.access_token;
+        if let Some(rt) = token_resp.refresh_token {
+            details.refresh_token = rt;
         }
+        if let Some(it) = token_resp.id_token {
+            details.id_token = Some(it);
+        }
+        details.expiry = DateTime::from_timestamp(Utc::now().timestamp() + token_resp.expires_in, 0)
+            .unwrap_or_else(Utc::now)
+            .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+        let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
+            token: details.clone(),
+            ..cred.clone()
+        });
+        true
+    };
+
+    if now >= expiry_ts - 60 && !details.refresh_token.is_empty() && renew(&mut details) {
+        access_token = details.access_token.clone();
     }
 
     let mut usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
-    if usage.is_empty() && !details.refresh_token.is_empty() {
-        if let Ok(token_resp) = crate::antigravity::refresh_google_oauth_token(&details.refresh_token, None) {
-            access_token = token_resp.access_token.clone();
-            details.access_token = token_resp.access_token;
-            let _ = crate::antigravity::write_system_antigravity_credential(&crate::antigravity::KeyringPayload {
-                token: details.clone(),
-                ..cred.clone()
-            });
-            usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
-        }
+    if usage.is_empty() && !details.refresh_token.is_empty() && renew(&mut details) {
+        access_token = details.access_token.clone();
+        usage = crate::antigravity::fetch_google_usage_buckets(&access_token, details.project_id.as_deref(), None);
     }
 
     if usage.is_empty() {

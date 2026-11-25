@@ -160,6 +160,10 @@ const tr: Record<string, string> = {
   "You are up to date.": "Uygulama güncel.",
   "Your installed version is newer than the GitHub release.": "Kurulu sürüm GitHub’daki sürümden daha yeni.",
   "Check for a new stable version on GitHub.": "GitHub’da yeni kararlı sürüm olup olmadığını kontrol et.",
+  "Expired": "Süresi doldu",
+  "Reset status": "Durumu sıfırla",
+  "Put this account back into rotation. It is flagged again if the problem is still there.": "Bu hesabı yeniden rotasyona alır. Sorun sürüyorsa tekrar işaretlenir.",
+  "Last 24 hours": "Son 24 saat",
 };
 
 export default tr;

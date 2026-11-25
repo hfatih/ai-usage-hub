@@ -445,8 +445,8 @@ fn query_auth_status() -> Result<Value> {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
-        match command.output() {
-            Ok(output) => match serde_json::from_slice::<Value>(&output.stdout) {
+        match output_with_timeout(command, AUTH_STATUS_TIMEOUT) {
+            Ok(stdout) => match serde_json::from_slice::<Value>(&stdout) {
                 Ok(value) => return Ok(value),
                 Err(error) => errors.push(format!("{}: {error}", executable.display())),
             },
@@ -462,7 +462,45 @@ fn query_auth_status() -> Result<Value> {
     )))
 }
 
-pub(crate) fn claude_candidates() -> Vec<PathBuf> {
+/// How long `claude auth status` may take. It runs on every provider refresh, and a CLI that
+/// hangs (an update prompt, a network stall) must not stall every later refresh with it.
+const AUTH_STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Runs `command` and returns its standard output, killing it if it outlives `timeout`.
+fn output_with_timeout(mut command: Command, timeout: std::time::Duration) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut child = command.spawn()?;
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(stdout) = stdout.as_mut() {
+            let _ = stdout.read_to_end(&mut bytes);
+        }
+        bytes
+    });
+    // Drained so a chatty CLI cannot block on a full stderr pipe.
+    let mut stderr = child.stderr.take();
+    std::thread::spawn(move || {
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = std::io::copy(stderr, &mut std::io::sink());
+        }
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    reader.join().map_err(|_| std::io::Error::other("output reader failed"))
+}
+
+fn claude_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = env::var_os("AI_USAGE_HUB_CLAUDE_EXECUTABLE") {
         candidates.push(PathBuf::from(path));

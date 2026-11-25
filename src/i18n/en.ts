@@ -172,6 +172,10 @@ const en: Record<string, string> = {
   "Sign-in link copied. Open it in any browser on this Mac (Port 8045)": "Sign-in link copied. Open it in any browser on this Mac (Port 8045)",
   "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one.": "Open the download page for AI Usage Hub {version}? Replace the app in Applications with the new one.",
   "Opening download page...": "Opening download page...",
+  "Expired": "Expired",
+  "Reset status": "Reset status",
+  "Put this account back into rotation. It is flagged again if the problem is still there.": "Put this account back into rotation. It is flagged again if the problem is still there.",
+  "Last 24 hours": "Last 24 hours",
 };
 
 export default en;

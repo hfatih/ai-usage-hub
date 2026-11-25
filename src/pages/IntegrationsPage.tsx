@@ -22,14 +22,13 @@ const setupText: Record<string, string> = {
 
 export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) => void }) {
   const { language, t } = useTranslation();
-  const { snapshot, accounts, refresh } = useHub();
+  const { snapshot, accounts } = useHub();
   if (!snapshot) return null;
 
   async function browse(appId: string) {
     const path = await api.chooseExecutable(t(byPlatform("Windows applications", "Mac applications")));
     if (!path) return;
-    await api.setExecutable(appId, path);
-    await refresh();
+    await useHub.getState().setExecutable(appId, path);
   }
 
   return <section>
@@ -61,7 +60,7 @@ export function IntegrationsPage({ onNavigate }: { onNavigate: (page: PageId) =>
           <Capability enabled={apps.some((app) => app.launchable)} label={t("Application launch ready")} />
         </div>
         <div className="integration-apps">
-          {apps.length ? apps.map((app) => <div key={app.id}><span className={`state-dot state-dot--${app.state}`} /><p><strong>{app.displayName}</strong><small>{t(app.state === "running" ? "Running now" : app.executablePath ? "Ready to launch" : "Executable not configured")}</small></p><button className="icon-button" title={t("Choose {name} executable", { name: app.displayName })} onClick={() => void browse(app.id)}><FolderSearch size={14} /></button><button className="icon-button" title={t("Open {name}", { name: app.displayName })} disabled={!app.launchable} onClick={() => void api.launchApp(app.id)}><ExternalLink size={14} /></button></div>) : <span className="integration-no-app"><Boxes size={13} />{t("No linked application")}</span>}
+          {apps.length ? apps.map((app) => <div key={app.id}><span className={`state-dot state-dot--${app.state}`} /><p><strong>{app.displayName}</strong><small>{t(app.state === "running" ? "Running now" : app.executablePath ? "Ready to launch" : "Executable not configured")}</small></p><button className="icon-button" title={t("Choose {name} executable", { name: app.displayName })} onClick={() => void browse(app.id)}><FolderSearch size={14} /></button><button className="icon-button" title={t("Open {name}", { name: app.displayName })} disabled={!app.launchable} onClick={() => void useHub.getState().launchApp(app.id)}><ExternalLink size={14} /></button></div>) : <span className="integration-no-app"><Boxes size={13} />{t("No linked application")}</span>}
         </div>
       </article>;
     })}</div>
