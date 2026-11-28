@@ -1,0 +1,53 @@
+name: Prepare release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release version (for example v1.0; preserve the current version/channel)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+      CI_WORKFLOW: .github/workflows/ci.yml
+    steps:
+      - name: Require a version and successful CI on this exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Use a version such as v1.0 or v1.0.0-rc.1.' >&2
+            exit 1
+          fi
+          conclusion=$(gh api "repos/${GH_REPO}/actions/runs?head_sha=${GITHUB_SHA}&per_page=100" |
+            jq -r --arg path "$CI_WORKFLOW" '[.workflow_runs[] | select(.path == $path)] | first | .conclusion // "missing"')
+          if [[ "$conclusion" != 'success' ]]; then
+            echo "The latest CI for ${GITHUB_SHA} must pass before preparing a release (found: ${conclusion})." >&2
+            exit 1
+          fi
+      - name: Generate release notes and create a draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A draft keeps publication, version acceptance and installer uploads deliberate.
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          echo "Prepared draft ${TAG} from ${GITHUB_SHA}. Review the notes and platform acceptance before publishing." >> "$GITHUB_STEP_SUMMARY"
